@@ -212,10 +212,12 @@ function ring(mesh: MeshBuilder, outer: Point[], inner: Point[], z: number, hint
 /**
  * Builds a Gridfinity bin mesh with pocket wells per tool.
  *
- * Construction (no CSG): base chamfer (0.8 mm, mates into the stacking lip of
- * the bin below), rounded 4 mm corners, outer walls, hollow cavity, deck slab
- * with pocket openings (earcut holes), pocket wells with individual floors,
- * and a 4.4 mm / 1.9 mm taper stacking lip on top.
+ * Construction (no CSG): per-cell chamfered base blocks (V-groove underside),
+ * rounded 4 mm corners, outer walls, a deck slab with pocket openings
+ * (earcut holes), pocket wells with individual floors, and a 4.4 mm / 1.9 mm
+ * taper stacking lip. The interior under the deck is solid — a hollow cavity
+ * would print as an unsupported floating bridge. With no tools, an open
+ * (hollow) bin is produced instead.
  */
 export function buildBinMesh(tray: TrayConfig, tools: ToolTrace[]): Triangle[] {
   const mesh = new MeshBuilder()
@@ -306,19 +308,18 @@ export function buildBinMesh(tray: TrayConfig, tools: ToolTrace[]): Triangle[] {
   ring(mesh, oLip, iLip, rimZ, { x: 0, y: 0, z: 1 }) // lip top ring
 
   if (pockets.length === 0) {
-    // Open bin: cavity floor at base top, inner walls up to the deck.
+    // Open bin: hollow cavity down to the base top, inner walls up to the deck.
     face(mesh, [iMain], GF.BASE_H, { x: 0, y: 0, z: 1 })
     loft(mesh, iMain, iMain, GF.BASE_H, deckZ, true)
     return mesh.triangles
   }
 
-  const maxDepth = Math.max(...pockets.map((p) => p.depthMm))
-  const deckBottomZ = deckZ - maxDepth
-
-  // --- cavity below the deck ---
-  face(mesh, [iMain], GF.BASE_H, { x: 0, y: 0, z: 1 }) // cavity floor
-  face(mesh, [iMain], deckBottomZ, { x: 0, y: 0, z: -1 }) // cavity ceiling (deck underside)
-  loft(mesh, iMain, iMain, GF.BASE_H, deckBottomZ, true)
+  // Solid interior from the base up to the deck — only the pocket wells are
+  // carved out. (A hollow under-deck cavity would print as an unsupported
+  // floating bridge, and tool inserts want the material anyway.)
+  //
+  // The region between the inner wall and the pocket polygons is solid, so
+  // no inner-wall or ceiling faces are emitted here at all.
 
   // --- deck top with pocket openings ---
   face(mesh, [iMain, ...pockets.map((p) => p.polygon)], deckZ, { x: 0, y: 0, z: 1 })
