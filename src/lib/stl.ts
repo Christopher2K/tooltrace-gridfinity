@@ -24,6 +24,8 @@ export class MeshBuilder {
       y: ab.z * ac.x - ab.x * ac.z,
       z: ab.x * ac.y - ab.y * ac.x,
     }
+    // Skip degenerate (zero-area) triangles — they break manifoldness checks.
+    if (Math.hypot(n.x, n.y, n.z) < 1e-9) return
     if (n.x * normalHint.x + n.y * normalHint.y + n.z * normalHint.z < 0) {
       this.triangles.push([a, c, b])
     } else {

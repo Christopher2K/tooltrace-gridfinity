@@ -56,16 +56,6 @@ export function TrayPanel() {
 
         <Switch.Root
           className={switchRow}
-          checked={tray.magnetHoles}
-          onCheckedChange={(d) => setTrayConfig({ magnetHoles: d.checked })}
-        >
-          <Switch.Control />
-          <Switch.Label>Magnet holes</Switch.Label>
-          <Switch.HiddenInput />
-        </Switch.Root>
-
-        <Switch.Root
-          className={switchRow}
           checked={snapMm > 0}
           onCheckedChange={(d) => setSnapMm(d.checked ? 5 : 0)}
         >

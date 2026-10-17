@@ -12,27 +12,15 @@ export const GF = {
   WALL_T: 1.2, // wall thickness
   HEIGHT_UNIT: 7, // per height level
   CORNER_R: 4, // outer corner radius
-  CHAMFER: 0.8, // 45° chamfer at the very bottom (mates with the lip below)
+  CHAMFER: 0.8, // 45° chamfer on every cell edge (mates with the lip below)
   LIP_H: 4.4, // stacking lip height
   LIP_TAPER: 1.9, // stacking lip outward flare per side
-  MAGNET_D: 6.5,
-  MAGNET_DEPTH: 2.4,
-  MAGNET_INSET: 8, // from each cell corner
 } as const
 
 interface Pocket {
   /** Polygon in tray mm coordinates (tolerance applied). */
   polygon: Point[]
   depthMm: number
-}
-
-function circlePoly(cx: number, cy: number, r: number, segments = 16): Point[] {
-  const pts: Point[] = []
-  for (let i = 0; i < segments; i++) {
-    const a = (i / segments) * Math.PI * 2
-    pts.push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) })
-  }
-  return pts
 }
 
 /** Triangulates a horizontal face (outer polygon + holes) at height z. */
@@ -120,6 +108,107 @@ function loft(mesh: MeshBuilder, bottom: Point[], top: Point[], zBottom: number,
   }
 }
 
+// Corner indices used by cellProfile (matches roundedRect ordering).
+const CORNER_TR = 0
+const CORNER_BR = 1
+const CORNER_BL = 2
+const CORNER_TL = 3
+
+/**
+ * Square cell-block profile with rounded outer corner(s) — a cell may own two
+ * outer corners when the bin is one unit wide/deep. Emits a fixed point count
+ * (4 * (seg+1)) so profiles loft cleanly; square corners are repeated points.
+ */
+function cellProfile(
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  r: number,
+  roundedCorners: ReadonlySet<number>,
+  seg = 6,
+): Point[] {
+  const corners = [
+    { cx: x1 - r, cy: y0 + r, a0: -Math.PI / 2, sx: x1, sy: y0 }, // TR
+    { cx: x1 - r, cy: y1 - r, a0: 0, sx: x1, sy: y1 }, // BR
+    { cx: x0 + r, cy: y1 - r, a0: Math.PI / 2, sx: x0, sy: y1 }, // BL
+    { cx: x0 + r, cy: y0 + r, a0: Math.PI, sx: x0, sy: y0 }, // TL
+  ]
+  const pts: Point[] = []
+  corners.forEach((c, idx) => {
+    if (roundedCorners.has(idx)) {
+      for (let i = 0; i <= seg; i++) {
+        const a = c.a0 + (i / seg) * (Math.PI / 2)
+        pts.push({ x: c.cx + r * Math.cos(a), y: c.cy + r * Math.sin(a) })
+      }
+    } else {
+      for (let i = 0; i <= seg; i++) pts.push({ x: c.sx, y: c.sy })
+    }
+  })
+  return pts
+}
+
+/**
+ * Rim profile, outset by `d` (0 = wall top, LIP_TAPER = lip flare), inset by
+ * `inset` (0 = outer surface, WALL_T = inner surface). Straight sides are
+ * segmented at every cell boundary so wall/groove edges pair exactly.
+ * Corner arc centers are fixed; only the radius changes.
+ */
+function rimProfile(d: number, inset: number, ux: number, uy: number, seg = 6): Point[] {
+  const C = GF.CLEARANCE / 2
+  const R = GF.CORNER_R - inset + d
+  const x0 = C + inset - d
+  const y0 = C + inset - d
+  const x1 = ux * GF.PITCH - C - inset + d
+  const y1 = uy * GF.PITCH - C - inset + d
+  const TL = { x: C + GF.CORNER_R, y: C + GF.CORNER_R }
+  const TR = { x: ux * GF.PITCH - C - GF.CORNER_R, y: C + GF.CORNER_R }
+  const BR = { x: ux * GF.PITCH - C - GF.CORNER_R, y: uy * GF.PITCH - C - GF.CORNER_R }
+  const BL = { x: C + GF.CORNER_R, y: uy * GF.PITCH - C - GF.CORNER_R }
+
+  const pts: Point[] = []
+  // earcut drops collinear vertices, which would T-junction faces against the
+  // segmented lofts — so groove points get a sub-micron perpendicular jitter.
+  const J = 0.0002
+  const j = (k: number) => (k % 2 === 0 ? J : -J)
+  const arc = (c: Point, a0: number) => {
+    for (let i = 0; i <= seg; i++) {
+      const a = a0 + (i / seg) * (Math.PI / 2)
+      pts.push({ x: c.x + R * Math.cos(a), y: c.y + R * Math.sin(a) })
+    }
+  }
+  arc(TR, -Math.PI / 2)
+  // right side, top → bottom
+  for (let k = 1; k < uy; k++) pts.push({ x: x1 + j(k), y: k * GF.PITCH - C }, { x: x1 + j(k), y: k * GF.PITCH + C })
+  arc(BR, 0)
+  // bottom side, right → left
+  for (let k = ux - 1; k >= 1; k--) pts.push({ x: k * GF.PITCH + C, y: y1 + j(k) }, { x: k * GF.PITCH - C, y: y1 + j(k) })
+  arc(BL, Math.PI / 2)
+  // left side, bottom → top
+  for (let k = uy - 1; k >= 1; k--) pts.push({ x: x0 + j(k), y: k * GF.PITCH + C }, { x: x0 + j(k), y: k * GF.PITCH - C })
+  arc(TL, Math.PI)
+  // top side, left → right
+  for (let k = 1; k < ux; k++) pts.push({ x: k * GF.PITCH - C, y: y0 + j(k) }, { x: k * GF.PITCH + C, y: y0 + j(k) })
+  return pts
+}
+
+/** Horizontal ring between two loft-compatible profiles at height z. */
+function ring(mesh: MeshBuilder, outer: Point[], inner: Point[], z: number, hint: Vec3) {
+  for (let i = 0; i < outer.length; i++) {
+    const a = outer[i]
+    const b = outer[(i + 1) % outer.length]
+    const a2 = inner[i]
+    const b2 = inner[(i + 1) % inner.length]
+    mesh.quad(
+      { x: a.x, y: a.y, z },
+      { x: b.x, y: b.y, z },
+      { x: b2.x, y: b2.y, z },
+      { x: a2.x, y: a2.y, z },
+      hint,
+    )
+  }
+}
+
 /**
  * Builds a Gridfinity bin mesh with pocket wells per tool.
  *
@@ -140,17 +229,10 @@ export function buildBinMesh(tray: TrayConfig, tools: ToolTrace[]): Triangle[] {
 
   // Profiles (outer surface is inset by CLEARANCE/2 from the cell pitch box,
   // so pocket polygons in tray coordinates shift by -C to match).
-  const oBottom = roundedRect(C + GF.CHAMFER, C + GF.CHAMFER, C + W - GF.CHAMFER, C + H - GF.CHAMFER, R - GF.CHAMFER)
-  const oMain = roundedRect(C, C, C + W, C + H, R)
-  const oLip = roundedRect(C - GF.LIP_TAPER, C - GF.LIP_TAPER, C + W + GF.LIP_TAPER, C + H + GF.LIP_TAPER, R + GF.LIP_TAPER)
-  const iMain = roundedRect(C + GF.WALL_T, C + GF.WALL_T, C + W - GF.WALL_T, C + H - GF.WALL_T, R - GF.WALL_T)
-  const iLip = roundedRect(
-    C + GF.WALL_T - GF.LIP_TAPER,
-    C + GF.WALL_T - GF.LIP_TAPER,
-    C + W - GF.WALL_T + GF.LIP_TAPER,
-    C + H - GF.WALL_T + GF.LIP_TAPER,
-    R - GF.WALL_T + GF.LIP_TAPER,
-  )
+  const oMain = rimProfile(0, 0, tray.widthUnits, tray.heightUnits)
+  const oLip = rimProfile(GF.LIP_TAPER, 0, tray.widthUnits, tray.heightUnits)
+  const iMain = rimProfile(0, GF.WALL_T, tray.widthUnits, tray.heightUnits)
+  const iLip = rimProfile(GF.LIP_TAPER, GF.WALL_T, tray.widthUnits, tray.heightUnits)
 
   // Pockets: transformed outlines + fit tolerance offset, shifted into bin
   // coordinates, depth clamped so the floor stays 1 mm above the cavity floor.
@@ -159,36 +241,69 @@ export function buildBinMesh(tray: TrayConfig, tools: ToolTrace[]): Triangle[] {
     depthMm: Math.min(t.pocketDepthMm, cavityH - 1),
   }))
 
-  // --- bottom face (+ optional magnet holes per cell corner) ---
-  const magnetHoles: Point[][] = []
-  if (tray.magnetHoles) {
-    for (let cx = 0; cx < tray.widthUnits; cx++) {
-      for (let cy = 0; cy < tray.heightUnits; cy++) {
-        const ox = cx * GF.PITCH
-        const oy = cy * GF.PITCH
-        for (const [ix, iy] of [
-          [GF.MAGNET_INSET, GF.MAGNET_INSET],
-          [GF.PITCH - GF.MAGNET_INSET, GF.MAGNET_INSET],
-          [GF.PITCH - GF.MAGNET_INSET, GF.PITCH - GF.MAGNET_INSET],
-          [GF.MAGNET_INSET, GF.PITCH - GF.MAGNET_INSET],
-        ]) {
-          magnetHoles.push(circlePoly(ox + ix, oy + iy, GF.MAGNET_D / 2))
-        }
-      }
+  // --- underside: per-cell chamfered base blocks (V-groove grid) ---
+  // Each cell gets a block chamfered on all 4 edges; blocks fuse above the
+  // chamfer top, leaving the characteristic grooves along every cell edge.
+  const cellCorners = (cx: number, cy: number): Set<number> => {
+    const s = new Set<number>()
+    if (cx === 0 && cy === 0) s.add(CORNER_TL)
+    if (cx === tray.widthUnits - 1 && cy === 0) s.add(CORNER_TR)
+    if (cx === 0 && cy === tray.heightUnits - 1) s.add(CORNER_BL)
+    if (cx === tray.widthUnits - 1 && cy === tray.heightUnits - 1) s.add(CORNER_BR)
+    return s
+  }
+  for (let cx = 0; cx < tray.widthUnits; cx++) {
+    for (let cy = 0; cy < tray.heightUnits; cy++) {
+      const x0 = cx * GF.PITCH + C
+      const y0 = cy * GF.PITCH + C
+      const x1 = (cx + 1) * GF.PITCH - C
+      const y1 = (cy + 1) * GF.PITCH - C
+      const rc = cellCorners(cx, cy)
+      const block = cellProfile(x0, y0, x1, y1, R, rc)
+      const bottom = cellProfile(x0 + GF.CHAMFER, y0 + GF.CHAMFER, x1 - GF.CHAMFER, y1 - GF.CHAMFER, R - GF.CHAMFER, rc)
+      face(mesh, [bottom], 0, { x: 0, y: 0, z: -1 }) // block underside
+      loft(mesh, bottom, block, 0, GF.CHAMFER, false) // 45° chamfer walls
     }
   }
-  face(mesh, [oBottom, ...magnetHoles], 0, { x: 0, y: 0, z: -1 })
-  for (const hole of magnetHoles) {
-    wallStrip(mesh, hole, GF.MAGNET_DEPTH, 0, true)
-    face(mesh, [hole], GF.MAGNET_DEPTH, { x: 0, y: 0, z: 1 })
+  // Groove tops at chamfer height, tiled so every edge pairs exactly:
+  // vertical strips per (boundary, row), horizontal strips per column,
+  // plus squares at groove crossings.
+  for (let k = 1; k < tray.widthUnits; k++) {
+    for (let cy = 0; cy < tray.heightUnits; cy++) {
+      face(mesh, [[
+        { x: k * GF.PITCH - C, y: cy * GF.PITCH + C },
+        { x: k * GF.PITCH + C, y: cy * GF.PITCH + C },
+        { x: k * GF.PITCH + C, y: (cy + 1) * GF.PITCH - C },
+        { x: k * GF.PITCH - C, y: (cy + 1) * GF.PITCH - C },
+      ]], GF.CHAMFER, { x: 0, y: 0, z: -1 })
+    }
+  }
+  for (let k = 1; k < tray.heightUnits; k++) {
+    for (let cx = 0; cx < tray.widthUnits; cx++) {
+      face(mesh, [[
+        { x: cx * GF.PITCH + C, y: k * GF.PITCH - C },
+        { x: (cx + 1) * GF.PITCH - C, y: k * GF.PITCH - C },
+        { x: (cx + 1) * GF.PITCH - C, y: k * GF.PITCH + C },
+        { x: cx * GF.PITCH + C, y: k * GF.PITCH + C },
+      ]], GF.CHAMFER, { x: 0, y: 0, z: -1 })
+    }
+  }
+  for (let kx = 1; kx < tray.widthUnits; kx++) {
+    for (let ky = 1; ky < tray.heightUnits; ky++) {
+      face(mesh, [[
+        { x: kx * GF.PITCH - C, y: ky * GF.PITCH - C },
+        { x: kx * GF.PITCH + C, y: ky * GF.PITCH - C },
+        { x: kx * GF.PITCH + C, y: ky * GF.PITCH + C },
+        { x: kx * GF.PITCH - C, y: ky * GF.PITCH + C },
+      ]], GF.CHAMFER, { x: 0, y: 0, z: -1 })
+    }
   }
 
-  // --- base chamfer + outer walls + stacking lip ---
-  loft(mesh, oBottom, oMain, 0, GF.CHAMFER, false)
+  // --- outer walls + stacking lip ---
   loft(mesh, oMain, oMain, GF.CHAMFER, deckZ, false)
   loft(mesh, oMain, oLip, deckZ, rimZ, false) // lip outer flare
   loft(mesh, iMain, iLip, deckZ, rimZ, true) // lip inner flare
-  face(mesh, [oLip, iLip], rimZ, { x: 0, y: 0, z: 1 }) // lip top ring
+  ring(mesh, oLip, iLip, rimZ, { x: 0, y: 0, z: 1 }) // lip top ring
 
   if (pockets.length === 0) {
     // Open bin: cavity floor at base top, inner walls up to the deck.

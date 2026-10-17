@@ -38,8 +38,6 @@ export interface TrayConfig {
   heightUnits: number
   /** Bin height units (7 mm per unit, Gridfinity spec). */
   heightLevelUnits: number
-  /** Magnet holes in the base. */
-  magnetHoles: boolean
 }
 
 export type ShapeKind = 'rectangle' | 'circle' | 'notch'
@@ -86,7 +84,6 @@ const initialTray: TrayConfig = {
   widthUnits: 3,
   heightUnits: 2,
   heightLevelUnits: 3,
-  magnetHoles: true,
 }
 
 const shapeLabels: Record<ShapeKind, string> = {
