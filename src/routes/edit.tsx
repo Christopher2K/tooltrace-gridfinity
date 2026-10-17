@@ -18,6 +18,18 @@ function Editor() {
       const target = e.target as HTMLElement
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
       const s = useEditorStore.getState()
+      // Undo / redo
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault()
+        if (e.shiftKey) s.redo()
+        else s.undo()
+        return
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault()
+        s.redo()
+        return
+      }
       const tool = s.tools.find((t) => t.id === s.selectedToolId)
       if (!tool) return
       if (e.key === 'Delete' || e.key === 'Backspace') {

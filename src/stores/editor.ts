@@ -39,12 +39,22 @@ export interface TrayConfig {
 
 export type ShapeKind = 'rectangle' | 'circle' | 'notch'
 
+interface Snapshot {
+  tray: TrayConfig
+  tools: ToolTrace[]
+}
+
+const HISTORY_LIMIT = 100
+
 interface EditorState {
   tray: TrayConfig
   tools: ToolTrace[]
   selectedToolId: string | null
   /** Position snap increment in mm; 0 = off. */
   snapMm: number
+  /** Undo/redo stacks (not persisted). */
+  past: Snapshot[]
+  future: Snapshot[]
 
   setTraySize: (widthUnits: number, heightUnits: number) => void
   setTrayConfig: (config: Partial<TrayConfig>) => void
@@ -52,12 +62,18 @@ interface EditorState {
   setTools: (tools: ToolTrace[]) => void
   addShape: (kind: ShapeKind) => void
   updateTool: (id: string, patch: Partial<ToolTrace>) => void
+  /** Like updateTool but without recording history — use inside drag gestures. */
+  updateToolTransient: (id: string, patch: Partial<ToolTrace>) => void
+  /** Records one history entry; call once at the start of a drag gesture. */
+  beginTransient: () => void
   removeTool: (id: string) => void
   duplicateTool: (id: string) => void
   rotateTool: (id: string, deltaDeg: number) => void
   flipTool: (id: string, axis: 'x' | 'y') => void
   selectTool: (id: string | null) => void
   setSnapMm: (mm: number) => void
+  undo: () => void
+  redo: () => void
   reset: () => void
 }
 
@@ -82,6 +98,17 @@ const shapeOutlines: Record<ShapeKind, () => Point[]> = {
 
 export const GRID_UNIT_MM = 42
 
+const snap = (s: Pick<EditorState, 'tray' | 'tools'>): Snapshot => ({
+  tray: s.tray,
+  tools: s.tools,
+})
+
+/** Pushes the current state onto the undo stack and clears redo. */
+const record = (s: Pick<EditorState, 'tray' | 'tools' | 'past'>) => ({
+  past: [...s.past.slice(-(HISTORY_LIMIT - 1)), snap(s)],
+  future: [] as Snapshot[],
+})
+
 export const useEditorStore = create<EditorState>()(
   persist(
     (set) => ({
@@ -89,12 +116,14 @@ export const useEditorStore = create<EditorState>()(
       tools: [],
       selectedToolId: null,
       snapMm: 5,
+      past: [],
+      future: [],
 
       setTraySize: (widthUnits, heightUnits) =>
-        set((s) => ({ tray: { ...s.tray, widthUnits, heightUnits } })),
-      setTrayConfig: (config) => set((s) => ({ tray: { ...s.tray, ...config } })),
-      addTool: (tool) => set((s) => ({ tools: [...s.tools, tool] })),
-      setTools: (tools) => set({ tools, selectedToolId: null }),
+        set((s) => ({ tray: { ...s.tray, widthUnits, heightUnits }, ...record(s) })),
+      setTrayConfig: (config) => set((s) => ({ tray: { ...s.tray, ...config }, ...record(s) })),
+      addTool: (tool) => set((s) => ({ tools: [...s.tools, tool], ...record(s) })),
+      setTools: (tools) => set((s) => ({ tools, selectedToolId: null, ...record(s) })),
       addShape: (kind) =>
         set((s) => {
           const outline = shapeOutlines[kind]()
@@ -112,16 +141,23 @@ export const useEditorStore = create<EditorState>()(
             pocketDepthMm: 10,
             isShape: true,
           }
-          return { tools: [...s.tools, tool], selectedToolId: tool.id }
+          return { tools: [...s.tools, tool], selectedToolId: tool.id, ...record(s) }
         }),
       updateTool: (id, patch) =>
         set((s) => ({
           tools: s.tools.map((t) => (t.id === id ? { ...t, ...patch } : t)),
+          ...record(s),
         })),
+      updateToolTransient: (id, patch) =>
+        set((s) => ({
+          tools: s.tools.map((t) => (t.id === id ? { ...t, ...patch } : t)),
+        })),
+      beginTransient: () => set((s) => record(s)),
       removeTool: (id) =>
         set((s) => ({
           tools: s.tools.filter((t) => t.id !== id),
           selectedToolId: s.selectedToolId === id ? null : s.selectedToolId,
+          ...record(s),
         })),
       duplicateTool: (id) =>
         set((s) => {
@@ -134,13 +170,14 @@ export const useEditorStore = create<EditorState>()(
             outline: src.outline.map((p) => ({ ...p })),
             position: { x: src.position.x + 10, y: src.position.y + 10 },
           }
-          return { tools: [...s.tools, copy], selectedToolId: copy.id }
+          return { tools: [...s.tools, copy], selectedToolId: copy.id, ...record(s) }
         }),
       rotateTool: (id, deltaDeg) =>
         set((s) => ({
           tools: s.tools.map((t) =>
             t.id === id ? { ...t, rotationDeg: ((t.rotationDeg + deltaDeg) % 360 + 360) % 360 } : t,
           ),
+          ...record(s),
         })),
       flipTool: (id, axis) =>
         set((s) => ({
@@ -154,11 +191,50 @@ export const useEditorStore = create<EditorState>()(
               ),
             }
           }),
+          ...record(s),
         })),
       selectTool: (id) => set({ selectedToolId: id }),
       setSnapMm: (mm) => set({ snapMm: mm }),
-      reset: () => set({ tray: initialTray, tools: [], selectedToolId: null, snapMm: 5 }),
+      undo: () =>
+        set((s) => {
+          if (s.past.length === 0) return s
+          const prev = s.past[s.past.length - 1]
+          const selectedAlive = prev.tools.some((t) => t.id === s.selectedToolId)
+          return {
+            tray: prev.tray,
+            tools: prev.tools,
+            past: s.past.slice(0, -1),
+            future: [snap(s), ...s.future].slice(0, HISTORY_LIMIT),
+            selectedToolId: selectedAlive ? s.selectedToolId : null,
+          }
+        }),
+      redo: () =>
+        set((s) => {
+          if (s.future.length === 0) return s
+          const next = s.future[0]
+          const selectedAlive = next.tools.some((t) => t.id === s.selectedToolId)
+          return {
+            tray: next.tray,
+            tools: next.tools,
+            past: [...s.past.slice(-(HISTORY_LIMIT - 1)), snap(s)],
+            future: s.future.slice(1),
+            selectedToolId: selectedAlive ? s.selectedToolId : null,
+          }
+        }),
+      reset: () =>
+        set((s) => ({
+          tray: initialTray,
+          tools: [],
+          selectedToolId: null,
+          snapMm: 5,
+          ...record(s),
+        })),
     }),
-    { name: 'tooltrace-editor' },
+    {
+      name: 'tooltrace-editor',
+      // History must not be persisted — it would balloon localStorage and
+      // restore stale undo stacks across sessions.
+      partialize: (s) => ({ tray: s.tray, tools: s.tools, snapMm: s.snapMm }),
+    },
   ),
 )

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Redo2, Undo2 } from 'lucide-react'
 import { css } from '~/styled-system/css'
 import { Button, IconButton } from '~/components/ui'
 import { bboxCenter, bboxOf, offsetPolygon, rotatePoint } from '~/lib/geometry'
@@ -58,6 +59,12 @@ export function EditorCanvas() {
   const selectedToolId = useEditorStore((s) => s.selectedToolId)
   const selectTool = useEditorStore((s) => s.selectTool)
   const updateTool = useEditorStore((s) => s.updateTool)
+  const updateToolTransient = useEditorStore((s) => s.updateToolTransient)
+  const beginTransient = useEditorStore((s) => s.beginTransient)
+  const canUndo = useEditorStore((s) => s.past.length > 0)
+  const canRedo = useEditorStore((s) => s.future.length > 0)
+  const undo = useEditorStore((s) => s.undo)
+  const redo = useEditorStore((s) => s.redo)
 
   const trayW = tray.widthUnits * GRID_UNIT_MM
   const trayH = tray.heightUnits * GRID_UNIT_MM
@@ -189,11 +196,12 @@ export function EditorCanvas() {
     e.stopPropagation()
     selectTool(tool.id)
     setDragging(true)
+    beginTransient() // one undo entry per drag gesture
     const start = toMm(e)
     const orig = { ...tool.position }
     const move = (ev: PointerEvent) => {
       const p = toMm(ev)
-      updateTool(tool.id, {
+      updateToolTransient(tool.id, {
         position: { x: snap(orig.x + p.x - start.x), y: snap(orig.y + p.y - start.y) },
       })
     }
@@ -211,6 +219,7 @@ export function EditorCanvas() {
   // --- vertex drag (edit mode) ---
   function onVertexPointerDown(e: React.PointerEvent, tool: ToolTrace, index: number) {
     e.stopPropagation()
+    beginTransient()
     const c = bboxCenter(tool.outline)
     const move = (ev: PointerEvent) => {
       const trayP = toMm(ev)
@@ -220,7 +229,7 @@ export function EditorCanvas() {
       const outline = tool.outline.map((p, i) =>
         i === index ? { x: Math.round(local.x * 10) / 10, y: Math.round(local.y * 10) / 10 } : p,
       )
-      updateTool(tool.id, { outline })
+      updateToolTransient(tool.id, { outline })
     }
     const up = () => {
       window.removeEventListener('pointermove', move)
@@ -260,6 +269,13 @@ export function EditorCanvas() {
       })}
     >
       <div className={zoomControls}>
+        <IconButton size="xs" variant="plain" aria-label="Undo" disabled={!canUndo} onClick={undo}>
+          <Undo2 size={14} />
+        </IconButton>
+        <IconButton size="xs" variant="plain" aria-label="Redo" disabled={!canRedo} onClick={redo}>
+          <Redo2 size={14} />
+        </IconButton>
+        <div className={css({ w: 'px', h: '4', bg: 'border', mx: '1' })} />
         <IconButton size="xs" variant="plain" aria-label="Zoom out" onClick={() => zoomBy(1 / 0.8)}>
           −
         </IconButton>
