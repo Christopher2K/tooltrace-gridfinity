@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Redo2, Undo2 } from 'lucide-react'
 import { css } from '~/styled-system/css'
 import { Button, IconButton } from '~/components/ui'
-import { bboxCenter, bboxOf, flattenOutline, insertVertex, offsetPolygon, outlinePath, quadPoint, removeVertex, rotatePoint, setEdgeCurve } from '~/lib/geometry'
+import { bboxCenter, bboxOf, flattenOutline, insertVertex, nearestEdgeProjection, offsetPolygon, outlinePath, quadPoint, removeVertex, rotatePoint, setEdgeCurve } from '~/lib/geometry'
 import { GRID_UNIT_MM, useEditorStore, type Point, type ToolTrace } from '~/stores/editor'
 
 interface View {
@@ -10,6 +10,20 @@ interface View {
   y: number
   w: number
   h: number
+}
+
+interface MenuItem {
+  label: string
+  onSelect: () => void
+  danger?: boolean
+  disabled?: boolean
+  separator?: boolean
+}
+
+interface MenuState {
+  x: number
+  y: number
+  items: MenuItem[]
 }
 
 const canvasCursor = css({ w: 'full', h: 'full', display: 'block', touchAction: 'none', cursor: 'default' })
@@ -29,6 +43,41 @@ const toolPolySelected = css({
 const toleranceLine = css({ fill: 'none', stroke: 'grass.8', strokeDasharray: '2 2', pointerEvents: 'none' })
 const vertexHandle = css({ fill: 'bg.default', stroke: 'grass.9', cursor: 'move' })
 const midHandle = css({ fill: 'grass.a4', stroke: 'grass.8', cursor: 'copy' })
+const menuPopover = css({
+  position: 'fixed',
+  inset: 'auto',
+  m: '0',
+  minW: '44',
+  py: '1',
+  bg: 'bg.default',
+  borderWidth: '1px',
+  borderColor: 'border',
+  borderRadius: 'l2',
+  shadow: 'md',
+  display: 'flex',
+  flexDir: 'column',
+})
+const menuItem = css({
+  px: '3',
+  py: '1.5',
+  textAlign: 'left',
+  textStyle: 'sm',
+  cursor: 'pointer',
+  bg: 'transparent',
+  _hover: { bg: 'gray.a2' },
+  _disabled: { color: 'fg.subtle', cursor: 'default', _hover: { bg: 'transparent' } },
+})
+const menuItemDanger = css({
+  px: '3',
+  py: '1.5',
+  textAlign: 'left',
+  textStyle: 'sm',
+  cursor: 'pointer',
+  bg: 'transparent',
+  color: 'red.9',
+  _hover: { bg: 'red.a2' },
+})
+const menuSep = css({ h: 'px', bg: 'border', my: '1' })
 const zoomControls = css({
   position: 'absolute',
   bottom: '3',
@@ -66,6 +115,9 @@ export function EditorCanvas() {
   const canRedo = useEditorStore((s) => s.future.length > 0)
   const undo = useEditorStore((s) => s.undo)
   const redo = useEditorStore((s) => s.redo)
+  const removeTool = useEditorStore((s) => s.removeTool)
+  const duplicateTool = useEditorStore((s) => s.duplicateTool)
+  const addShape = useEditorStore((s) => s.addShape)
 
   const trayW = tray.widthUnits * GRID_UNIT_MM
   const trayH = tray.heightUnits * GRID_UNIT_MM
@@ -74,6 +126,22 @@ export function EditorCanvas() {
   const [view, setView] = useState<View | null>(null)
   const [dragging, setDragging] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [menu, setMenu] = useState<MenuState | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  // Open the native popover when the menu appears; sync state on light-dismiss.
+  useEffect(() => {
+    const el = menuRef.current
+    if (el && menu && !el.matches(':popover-open')) {
+      el.showPopover()
+    }
+  }, [menu])
+
+  function openMenu(e: { clientX: number; clientY: number; preventDefault: () => void; stopPropagation: () => void }, items: MenuItem[]) {
+    e.preventDefault()
+    e.stopPropagation()
+    setMenu({ x: e.clientX, y: e.clientY, items })
+  }
 
   /** Bounds of tray + all tools, padded. */
   function computeFit(): View {
@@ -280,6 +348,87 @@ export function EditorCanvas() {
     updateTool(tool.id, insertVertex(tool, edge, mid))
   }
 
+  // --- context menus (native contextmenu event + HTML popover) ---
+  function onShapeContextMenu(e: React.MouseEvent, tool: ToolTrace) {
+    if (editingId === tool.id) {
+      const local = toLocal(tool, toMm(e))
+      const { edge, point } = nearestEdgeProjection(tool, local)
+      openMenu(e, [
+        { label: 'Add point here', onSelect: () => updateTool(tool.id, insertVertex(tool, edge, point)) },
+        { label: '', onSelect: () => {}, separator: true },
+        {
+          label: 'Delete tool',
+          danger: true,
+          onSelect: () => {
+            removeTool(tool.id)
+            setEditingId(null)
+          },
+        },
+      ])
+    } else {
+      openMenu(e, [
+        {
+          label: 'Edit outline',
+          onSelect: () => {
+            selectTool(tool.id)
+            setEditingId(tool.id)
+          },
+        },
+        { label: 'Duplicate', onSelect: () => duplicateTool(tool.id) },
+        { label: '', onSelect: () => {}, separator: true },
+        { label: 'Delete', danger: true, onSelect: () => removeTool(tool.id) },
+      ])
+    }
+  }
+
+  function onVertexContextMenu(e: React.MouseEvent, tool: ToolTrace, index: number) {
+    openMenu(e, [
+      {
+        label: 'Delete point',
+        disabled: tool.outline.length <= 3,
+        onSelect: () => {
+          const patch = removeVertex(tool, index)
+          if (patch) updateTool(tool.id, patch)
+        },
+      },
+      { label: '', onSelect: () => {}, separator: true },
+      {
+        label: 'Delete tool',
+        danger: true,
+        onSelect: () => {
+          removeTool(tool.id)
+          setEditingId(null)
+        },
+      },
+    ])
+  }
+
+  function onMidContextMenu(e: React.MouseEvent, tool: ToolTrace, edge: number) {
+    const curve = tool.curves?.[edge]
+    const local = toLocal(tool, toMm(e))
+    openMenu(e, [
+      {
+        label: 'Add point here',
+        onSelect: () => updateTool(tool.id, insertVertex(tool, edge, local)),
+      },
+      curve
+        ? { label: 'Straighten edge', onSelect: () => updateTool(tool.id, setEdgeCurve(tool, edge, null)) }
+        : { label: 'Drag handle to curve the edge', disabled: true, onSelect: () => {} },
+    ])
+  }
+
+  function onBackgroundContextMenu(e: React.MouseEvent) {
+    if (e.target !== e.currentTarget && (e.target as Element).tagName !== 'rect') return
+    const p = toMm(e)
+    openMenu(e, [
+      { label: 'Add rectangle here', onSelect: () => addShape('rectangle', p) },
+      { label: 'Add circle here', onSelect: () => addShape('circle', p) },
+      { label: 'Add notch here', onSelect: () => addShape('notch', p) },
+      { label: '', onSelect: () => {}, separator: true },
+      { label: 'Zoom to fit', onSelect: () => setView(computeFit()) },
+    ])
+  }
+
   const v = view ?? computeFit()
 
   const gridLines: React.ReactNode[] = []
@@ -337,6 +486,7 @@ export function EditorCanvas() {
         viewBox={`${v.x} ${v.y} ${v.w} ${v.h}`}
         className={dragging ? canvasCursorDrag : canvasCursor}
         onPointerDown={onBackgroundPointerDown}
+        onContextMenu={onBackgroundContextMenu}
       >
         {/* Tray */}
         <rect x={0} y={0} width={trayW} height={trayH} className={css({ fill: 'gray.a2', stroke: 'gray.7' })} strokeWidth={0.5} />
@@ -363,6 +513,7 @@ export function EditorCanvas() {
               <path
                 d={outlinePath(tool.outline, tool.curves)}
                 onPointerDown={(e) => onToolPointerDown(e, tool)}
+                onContextMenu={(e) => onShapeContextMenu(e, tool)}
                 onDoubleClick={(e) => {
                   e.stopPropagation()
                   selectTool(tool.id)
@@ -392,6 +543,7 @@ export function EditorCanvas() {
                         strokeWidth={0.4}
                         onPointerDown={(e) => onMidPointerDown(e, tool, i)}
                         onDoubleClick={(e) => onMidDoubleClick(e, tool, i)}
+                        onContextMenu={(e) => onMidContextMenu(e, tool, i)}
                       />
                     )
                   })}
@@ -406,6 +558,7 @@ export function EditorCanvas() {
                       strokeWidth={0.4}
                       onPointerDown={(e) => onVertexPointerDown(e, tool, i)}
                       onDoubleClick={(e) => onVertexDoubleClick(e, tool, i)}
+                      onContextMenu={(e) => onVertexContextMenu(e, tool, i)}
                     />
                   ))}
                 </>
@@ -414,6 +567,40 @@ export function EditorCanvas() {
           )
         })}
       </svg>
+
+      {/* Context menu — native HTML popover (top layer, light-dismiss built in) */}
+      {menu && (
+        <div
+          ref={menuRef}
+          popover="auto"
+          onToggle={(e: any) => {
+            if (e.newState === 'closed') setMenu(null)
+          }}
+          className={menuPopover}
+          style={{
+            left: Math.min(menu.x, window.innerWidth - 190),
+            top: Math.min(menu.y, window.innerHeight - menu.items.length * 36 - 16),
+          }}
+        >
+          {menu.items.map((item, i) =>
+            item.separator ? (
+              <div key={i} className={menuSep} />
+            ) : (
+              <button
+                key={i}
+                className={item.danger ? menuItemDanger : menuItem}
+                disabled={item.disabled}
+                onClick={() => {
+                  item.onSelect()
+                  setMenu(null)
+                }}
+              >
+                {item.label}
+              </button>
+            ),
+          )}
+        </div>
+      )}
     </div>
   )
 }

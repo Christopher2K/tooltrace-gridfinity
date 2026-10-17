@@ -91,6 +91,27 @@ export function outlinePath(outline: Point[], curves?: Record<number, Point>): s
   return d + ' Z'
 }
 
+/** Finds the nearest edge to a local point and the projected point on it. */
+export function nearestEdgeProjection(
+  tool: ToolTrace,
+  p: Point,
+): { edge: number; point: Point; dist: number } {
+  const n = tool.outline.length
+  let best = { edge: 0, point: { ...tool.outline[0] }, dist: Infinity }
+  for (let i = 0; i < n; i++) {
+    const a = tool.outline[i]
+    const b = tool.outline[(i + 1) % n]
+    const dx = b.x - a.x
+    const dy = b.y - a.y
+    const len2 = dx * dx + dy * dy || 1e-9
+    const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2))
+    const proj = { x: a.x + t * dx, y: a.y + t * dy }
+    const dist = Math.hypot(p.x - proj.x, p.y - proj.y)
+    if (dist < best.dist) best = { edge: i, point: proj, dist }
+  }
+  return best
+}
+
 /** Sets or clears the curve on edge i. Returns the patch for updateTool. */
 export function setEdgeCurve(tool: ToolTrace, edge: number, control: Point | null): Partial<ToolTrace> {
   const curves = { ...(tool.curves ?? {}) }

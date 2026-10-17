@@ -65,7 +65,7 @@ interface EditorState {
   setTrayConfig: (config: Partial<TrayConfig>) => void
   addTool: (tool: ToolTrace) => void
   setTools: (tools: ToolTrace[]) => void
-  addShape: (kind: ShapeKind) => void
+  addShape: (kind: ShapeKind, at?: Point) => void
   updateTool: (id: string, patch: Partial<ToolTrace>) => void
   /** Like updateTool but without recording history — use inside drag gestures. */
   updateToolTransient: (id: string, patch: Partial<ToolTrace>) => void
@@ -129,18 +129,21 @@ export const useEditorStore = create<EditorState>()(
       setTrayConfig: (config) => set((s) => ({ tray: { ...s.tray, ...config }, ...record(s) })),
       addTool: (tool) => set((s) => ({ tools: [...s.tools, tool], ...record(s) })),
       setTools: (tools) => set((s) => ({ tools, selectedToolId: null, ...record(s) })),
-      addShape: (kind) =>
+      addShape: (kind, at) =>
         set((s) => {
           const outline = shapeOutlines[kind]()
           const b = bboxOf(outline)
           const trayW = s.tray.widthUnits * GRID_UNIT_MM
           const trayH = s.tray.heightUnits * GRID_UNIT_MM
+          const position = at
+            ? { x: Math.round((at.x - b.w / 2) * 10) / 10, y: Math.round((at.y - b.h / 2) * 10) / 10 }
+            : { x: (trayW - b.w) / 2, y: (trayH - b.h) / 2 }
           const count = s.tools.filter((t) => t.isShape).length + 1
           const tool: ToolTrace = {
             id: crypto.randomUUID(),
             label: `${shapeLabels[kind]} ${count}`,
             outline,
-            position: { x: (trayW - b.w) / 2, y: (trayH - b.h) / 2 },
+            position,
             rotationDeg: 0,
             toleranceMm: 0,
             pocketDepthMm: 10,
