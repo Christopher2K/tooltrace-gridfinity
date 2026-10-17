@@ -53,6 +53,10 @@ milestones (M1–M4).
 - `panda.config.ts` — Panda + Park UI theme configuration
 - `components.json` — Park UI CLI config (aliases into `src/`)
 - `src/stores/editor.ts` — editor state model (ToolTrace, TrayConfig)
+- `src/lib/vision.ts` — photo → outline detection (pure JS CV)
+- `src/lib/geometry.ts` — polygon math (offset, curves, intersection, vertex ops)
+- `src/lib/gridfinity.ts` — Gridfinity bin mesh builder (earcut triangulation, no CSG)
+- `src/lib/stl.ts` — binary STL writer
 - `PRODUCT_SPEC.md` — product requirements and milestones
 
 ## Docs for agents

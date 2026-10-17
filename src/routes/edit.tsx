@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useEffect } from 'react'
 import { css } from '~/styled-system/css'
 import { EditorCanvas } from '~/components/editor/canvas'
+import { ExportPanel } from '~/components/editor/export-panel'
 import { ToolsPanel } from '~/components/editor/tools-panel'
 import { TrayPanel } from '~/components/editor/tray-panel'
 import { ValidationPanel } from '~/components/editor/validation-panel'
@@ -58,6 +59,7 @@ function Editor() {
       <TrayPanel />
       <EditorCanvas />
       <div className={css({ display: 'flex', flexDir: 'column', gap: '4' })}>
+        <ExportPanel />
         <ToolsPanel />
         <ValidationPanel />
       </div>
