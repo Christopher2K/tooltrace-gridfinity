@@ -4,18 +4,26 @@ import { GRID_UNIT_MM } from '~/stores/editor'
 import { cleanPolygon, clipPolygonToRect, offsetPolygon, pointInPolygon, segmentsIntersect, toolPoints } from './geometry'
 import { MeshBuilder, type Triangle, type Vec3 } from './stl'
 
-/** Gridfinity dimensions (mm). */
+/** Gridfinity dimensions (mm), measured from an official bin. */
 export const GF = {
   PITCH: GRID_UNIT_MM, // 42
   CLEARANCE: 0.5, // total, per bin dimension
-  BASE_H: 4.75, // solid base block height
+  BASE_H: 4.75, // base block height (inside the 7mm height units)
+  HEIGHT_UNIT: 7, // per height level; total bin height = 7*U + LIP_H
   WALL_T: 1.2, // wall thickness
-  HEIGHT_UNIT: 7, // per height level
+  WALL_INSET: 1.2, // outer wall inset from the base block edge (base is widest)
   CORNER_R: 4, // outer corner radius
-  CHAMFER: 0.8, // 45° chamfer on every cell edge (mates with the lip below)
   LIP_H: 4.4, // stacking lip height
-  LIP_TAPER: 1.9, // stacking lip outward flare per side
+  LIP_TAPER: 1.9, // stacking lip top ring width per side
+  // Base block underside profile (per cell, inset from cell bounds):
+  BLOCK_BOTTOM_INSET: 3.2, // 35.6mm block bottom
+  BLOCK_CHAMFER_H: 0.8, // 45° chamfer to 37.2
+  BLOCK_STRAIGHT_H: 2.6, // straight section height
+  BLOCK_TOP_INSET: 0.25, // 41.5mm at the top of the taper
 } as const
+
+/** Outer wall inset from the base edge = WALL_INSET; inner = one wall thickness more. */
+const INNER_INSET = GF.WALL_INSET + GF.WALL_T
 
 interface Pocket {
   /** Polygon in tray mm coordinates (tolerance applied). */
@@ -168,6 +176,7 @@ function cellProfile(
  */
 function rimProfile(d: number, inset: number, ux: number, uy: number, seg = 6): Point[] {
   const C = GF.CLEARANCE / 2
+  const G = GF.CLEARANCE / 2 // groove-top half width — matches block edges
   const R = GF.CORNER_R - inset + d
   const x0 = C + inset - d
   const y0 = C + inset - d
@@ -191,16 +200,16 @@ function rimProfile(d: number, inset: number, ux: number, uy: number, seg = 6): 
   }
   arc(TR, -Math.PI / 2)
   // right side, top → bottom
-  for (let k = 1; k < uy; k++) pts.push({ x: x1 + j(k), y: k * GF.PITCH - C }, { x: x1 + j(k), y: k * GF.PITCH + C })
+  for (let k = 1; k < uy; k++) pts.push({ x: x1 + j(k), y: k * GF.PITCH - G }, { x: x1 + j(k), y: k * GF.PITCH + G })
   arc(BR, 0)
   // bottom side, right → left
-  for (let k = ux - 1; k >= 1; k--) pts.push({ x: k * GF.PITCH + C, y: y1 + j(k) }, { x: k * GF.PITCH - C, y: y1 + j(k) })
+  for (let k = ux - 1; k >= 1; k--) pts.push({ x: k * GF.PITCH + G, y: y1 + j(k) }, { x: k * GF.PITCH - G, y: y1 + j(k) })
   arc(BL, Math.PI / 2)
   // left side, bottom → top
-  for (let k = uy - 1; k >= 1; k--) pts.push({ x: x0 + j(k), y: k * GF.PITCH + C }, { x: x0 + j(k), y: k * GF.PITCH - C })
+  for (let k = uy - 1; k >= 1; k--) pts.push({ x: x0 + j(k), y: k * GF.PITCH + G }, { x: x0 + j(k), y: k * GF.PITCH - G })
   arc(TL, Math.PI)
   // top side, left → right
-  for (let k = 1; k < ux; k++) pts.push({ x: k * GF.PITCH - C, y: y0 + j(k) }, { x: k * GF.PITCH + C, y: y0 + j(k) })
+  for (let k = 1; k < ux; k++) pts.push({ x: k * GF.PITCH - G, y: y0 + j(k) }, { x: k * GF.PITCH + G, y: y0 + j(k) })
   return pts
 }
 
@@ -243,17 +252,21 @@ export function buildBinMesh(tray: TrayConfig, tools: ToolTrace[]): BinMesh {
   const C = GF.CLEARANCE / 2
   const W = tray.widthUnits * GF.PITCH - GF.CLEARANCE
   const H = tray.heightUnits * GF.PITCH - GF.CLEARANCE
-  const deckZ = GF.BASE_H + tray.heightLevelUnits * GF.HEIGHT_UNIT
+  const deckZ = tray.heightLevelUnits * GF.HEIGHT_UNIT // 7U — base included
   const rimZ = deckZ + GF.LIP_H
   const cavityH = deckZ - GF.BASE_H
   const R = GF.CORNER_R
 
-  // Profiles (outer surface is inset by CLEARANCE/2 from the cell pitch box,
-  // so pocket polygons in tray coordinates shift by -C to match).
-  const oMain = rimProfile(0, 0, tray.widthUnits, tray.heightUnits)
-  const oLip = rimProfile(GF.LIP_TAPER, 0, tray.widthUnits, tray.heightUnits)
-  const iMain = rimProfile(0, GF.WALL_T, tray.widthUnits, tray.heightUnits)
-  const iLip = rimProfile(GF.LIP_TAPER, GF.WALL_T, tray.widthUnits, tray.heightUnits)
+  // Profiles, measured from an official bin:
+  //   base edge (41.75 plane, widest point) = rimProfile(0, 0)
+  //   outer wall = inset 1.2 from the base edge
+  //   inner wall = inset 2.4 from the base edge
+  //   lip flares back out to the base edge; lip inner tapers 0.5 then straight
+  const baseTop = rimProfile(0, 0, tray.widthUnits, tray.heightUnits)
+  const oMain = rimProfile(0, GF.WALL_INSET, tray.widthUnits, tray.heightUnits)
+  const oLip = rimProfile(GF.WALL_INSET, GF.WALL_INSET, tray.widthUnits, tray.heightUnits)
+  const iMain = rimProfile(0, INNER_INSET, tray.widthUnits, tray.heightUnits)
+  const iLip = rimProfile(0.5, INNER_INSET, tray.widthUnits, tray.heightUnits)
 
   // Pockets: transformed outlines + fit tolerance offset, shifted into bin
   // coordinates, then cleaned (traced outlines can carry duplicate/collinear
@@ -263,15 +276,15 @@ export function buildBinMesh(tray: TrayConfig, tools: ToolTrace[]): BinMesh {
   // warning (moving the tool slightly off the corner fixes it) — the rounded
   // corner can't be represented by the rect clip.
   const MARGIN = 0.4
-  const innerR = R - GF.WALL_T
-  const ix0 = C + GF.WALL_T + MARGIN
-  const iy0 = C + GF.WALL_T + MARGIN
-  const ix1 = C + W - GF.WALL_T - MARGIN
-  const iy1 = C + H - GF.WALL_T - MARGIN
-  const iw0 = C + GF.WALL_T
-  const iw1 = C + W - GF.WALL_T
-  const ih0 = C + GF.WALL_T
-  const ih1 = C + H - GF.WALL_T
+  const innerR = R - INNER_INSET
+  const ix0 = C + INNER_INSET + MARGIN
+  const iy0 = C + INNER_INSET + MARGIN
+  const ix1 = C + W - INNER_INSET - MARGIN
+  const iy1 = C + H - INNER_INSET - MARGIN
+  const iw0 = C + INNER_INSET
+  const iw1 = C + W - INNER_INSET
+  const ih0 = C + INNER_INSET
+  const ih1 = C + H - INNER_INSET
   const cornerZones: Point[][] = ([
     [iw0, ih0, iw0 + innerR + MARGIN, ih0 + innerR + MARGIN], // TL
     [iw1 - innerR - MARGIN, ih0, iw1, ih0 + innerR + MARGIN], // TR
@@ -314,9 +327,10 @@ export function buildBinMesh(tray: TrayConfig, tools: ToolTrace[]): BinMesh {
     pockets.push({ polygon, depthMm: Math.min(t.pocketDepthMm, cavityH - 1) })
   }
 
-  // --- underside: per-cell chamfered base blocks (V-groove grid) ---
-  // Each cell gets a block chamfered on all 4 edges; blocks fuse above the
-  // chamfer top, leaving the characteristic grooves along every cell edge.
+  // --- underside: per-cell base blocks with the official profile ---
+  // Per cell: bottom inset 3.2 (35.6mm) → 45° chamfer to 2.4 (37.2) at 0.8,
+  // straight to 2.6, then 45° taper to 0.25 (41.5) at 4.75. Grooves between
+  // blocks open downward; groove tops close at BASE_H.
   const cellCorners = (cx: number, cy: number): Set<number> => {
     const s = new Set<number>()
     if (cx === 0 && cy === 0) s.add(CORNER_TL)
@@ -325,6 +339,10 @@ export function buildBinMesh(tray: TrayConfig, tools: ToolTrace[]): BinMesh {
     if (cx === tray.widthUnits - 1 && cy === tray.heightUnits - 1) s.add(CORNER_BR)
     return s
   }
+  const Z1 = GF.BLOCK_CHAMFER_H // 0.8
+  const Z2 = GF.BLOCK_STRAIGHT_H // 2.6
+  const Z3 = GF.BASE_H // 4.75
+  const G = GF.CLEARANCE / 2 // half groove-top width at BASE_H
   for (let cx = 0; cx < tray.widthUnits; cx++) {
     for (let cy = 0; cy < tray.heightUnits; cy++) {
       const x0 = cx * GF.PITCH + C
@@ -332,50 +350,58 @@ export function buildBinMesh(tray: TrayConfig, tools: ToolTrace[]): BinMesh {
       const x1 = (cx + 1) * GF.PITCH - C
       const y1 = (cy + 1) * GF.PITCH - C
       const rc = cellCorners(cx, cy)
-      const block = cellProfile(x0, y0, x1, y1, R, rc)
-      const bottom = cellProfile(x0 + GF.CHAMFER, y0 + GF.CHAMFER, x1 - GF.CHAMFER, y1 - GF.CHAMFER, R - GF.CHAMFER, rc)
-      face(mesh, [bottom], 0, { x: 0, y: 0, z: -1 }) // block underside
-      loft(mesh, bottom, block, 0, GF.CHAMFER, false) // 45° chamfer walls
+      const prof = (d: number) =>
+        cellProfile(x0 + d, y0 + d, x1 - d, y1 - d, R - d, rc)
+      const p0 = prof(GF.BLOCK_BOTTOM_INSET) // 3.2 → 35.6mm bottom
+      const p1 = prof(2.4) // 37.2 at chamfer top
+      const p3 = prof(0) // cell bounds (41.5) at base top
+      face(mesh, [p0], 0, { x: 0, y: 0, z: -1 }) // block underside
+      loft(mesh, p0, p1, 0, Z1, false) // 45° bottom chamfer
+      loft(mesh, p1, p1, Z1, Z2, false) // straight section
+      loft(mesh, p1, p3, Z2, Z3, false) // 45° taper to full width
     }
   }
-  // Groove tops at chamfer height, tiled so every edge pairs exactly:
+  // Groove tops at BASE_H, tiled so every edge pairs exactly:
   // vertical strips per (boundary, row), horizontal strips per column,
   // plus squares at groove crossings.
   for (let k = 1; k < tray.widthUnits; k++) {
     for (let cy = 0; cy < tray.heightUnits; cy++) {
       face(mesh, [[
-        { x: k * GF.PITCH - C, y: cy * GF.PITCH + C },
-        { x: k * GF.PITCH + C, y: cy * GF.PITCH + C },
-        { x: k * GF.PITCH + C, y: (cy + 1) * GF.PITCH - C },
-        { x: k * GF.PITCH - C, y: (cy + 1) * GF.PITCH - C },
-      ]], GF.CHAMFER, { x: 0, y: 0, z: -1 })
+        { x: k * GF.PITCH - G, y: cy * GF.PITCH + C },
+        { x: k * GF.PITCH + G, y: cy * GF.PITCH + C },
+        { x: k * GF.PITCH + G, y: (cy + 1) * GF.PITCH - C },
+        { x: k * GF.PITCH - G, y: (cy + 1) * GF.PITCH - C },
+      ]], Z3, { x: 0, y: 0, z: -1 })
     }
   }
   for (let k = 1; k < tray.heightUnits; k++) {
     for (let cx = 0; cx < tray.widthUnits; cx++) {
       face(mesh, [[
-        { x: cx * GF.PITCH + C, y: k * GF.PITCH - C },
-        { x: (cx + 1) * GF.PITCH - C, y: k * GF.PITCH - C },
-        { x: (cx + 1) * GF.PITCH - C, y: k * GF.PITCH + C },
-        { x: cx * GF.PITCH + C, y: k * GF.PITCH + C },
-      ]], GF.CHAMFER, { x: 0, y: 0, z: -1 })
+        { x: cx * GF.PITCH + C, y: k * GF.PITCH - G },
+        { x: (cx + 1) * GF.PITCH - C, y: k * GF.PITCH - G },
+        { x: (cx + 1) * GF.PITCH - C, y: k * GF.PITCH + G },
+        { x: cx * GF.PITCH + C, y: k * GF.PITCH + G },
+      ]], Z3, { x: 0, y: 0, z: -1 })
     }
   }
   for (let kx = 1; kx < tray.widthUnits; kx++) {
     for (let ky = 1; ky < tray.heightUnits; ky++) {
       face(mesh, [[
-        { x: kx * GF.PITCH - C, y: ky * GF.PITCH - C },
-        { x: kx * GF.PITCH + C, y: ky * GF.PITCH - C },
-        { x: kx * GF.PITCH + C, y: ky * GF.PITCH + C },
-        { x: kx * GF.PITCH - C, y: ky * GF.PITCH + C },
-      ]], GF.CHAMFER, { x: 0, y: 0, z: -1 })
+        { x: kx * GF.PITCH - G, y: ky * GF.PITCH - G },
+        { x: kx * GF.PITCH + G, y: ky * GF.PITCH - G },
+        { x: kx * GF.PITCH + G, y: ky * GF.PITCH + G },
+        { x: kx * GF.PITCH - G, y: ky * GF.PITCH + G },
+      ]], Z3, { x: 0, y: 0, z: -1 })
     }
   }
 
-  // --- outer walls + stacking lip ---
-  loft(mesh, oMain, oMain, GF.CHAMFER, deckZ, false)
-  loft(mesh, oMain, oLip, deckZ, rimZ, false) // lip outer flare
-  loft(mesh, iMain, iLip, deckZ, rimZ, true) // lip inner flare
+  // --- base top ledge, walls, stacking lip ---
+  // Ledge ring from the block outline (= bin edge at base top) to the wall.
+  ring(mesh, baseTop, oMain, Z3, { x: 0, y: 0, z: 1 })
+  loft(mesh, oMain, oMain, Z3, deckZ, false) // walls (inset 1.2 from base edge)
+  loft(mesh, oMain, oLip, deckZ, rimZ, false) // lip flares back out to the base edge
+  loft(mesh, iMain, iLip, deckZ, deckZ + 0.7, true) // lip inner: taper 0.5
+  loft(mesh, iLip, iLip, deckZ + 0.7, rimZ, true) // …then straight to the rim
   ring(mesh, oLip, iLip, rimZ, { x: 0, y: 0, z: 1 }) // lip top ring
 
   if (pockets.length === 0) {

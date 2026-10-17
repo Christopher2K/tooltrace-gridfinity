@@ -14,7 +14,7 @@ export function TrayPanel() {
 
   const trayW = tray.widthUnits * GRID_UNIT_MM
   const trayH = tray.heightUnits * GRID_UNIT_MM
-  const binHeightMm = tray.heightLevelUnits * 7
+  const binHeightMm = tray.heightLevelUnits * 7 + 4.4 // 7U + stacking lip
 
   return (
     <Card.Root>

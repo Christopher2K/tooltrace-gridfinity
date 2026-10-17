@@ -12,7 +12,7 @@ export function ValidationPanel() {
 
   const trayW = tray.widthUnits * GRID_UNIT_MM
   const trayH = tray.heightUnits * GRID_UNIT_MM
-  const binHeightMm = tray.heightLevelUnits * 7
+  const deckZ = tray.heightLevelUnits * 7 // pocket openings sit at the top of the walls (7U)
   const warnings: string[] = []
 
   const transformed = tools.map((t) => ({ tool: t, pts: toolPoints(t) }))
@@ -22,8 +22,8 @@ export function ValidationPanel() {
     if (b.x < -0.01 || b.y < -0.01 || b.x + b.w > trayW + 0.01 || b.y + b.h > trayH + 0.01) {
       warnings.push(`"${tool.label}" extends outside the tray`)
     }
-    if (tool.pocketDepthMm >= binHeightMm - 2) {
-      warnings.push(`"${tool.label}" pocket depth (${tool.pocketDepthMm} mm) is too deep for a ${binHeightMm} mm bin`)
+    if (tool.pocketDepthMm >= deckZ - 2) {
+      warnings.push(`"${tool.label}" pocket depth (${tool.pocketDepthMm} mm) is too deep for a ${deckZ} mm deck`)
     }
   }
 
