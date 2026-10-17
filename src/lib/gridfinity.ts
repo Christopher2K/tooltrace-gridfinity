@@ -1,7 +1,7 @@
 import earcut from 'earcut'
 import type { Point, ToolTrace, TrayConfig } from '~/stores/editor'
 import { GRID_UNIT_MM } from '~/stores/editor'
-import { offsetPolygon, toolPoints } from './geometry'
+import { cleanPolygon, clipPolygonToRect, offsetPolygon, pointInPolygon, segmentsIntersect, toolPoints } from './geometry'
 import { MeshBuilder, type Triangle, type Vec3 } from './stl'
 
 /** Gridfinity dimensions (mm). */
@@ -21,6 +21,18 @@ interface Pocket {
   /** Polygon in tray mm coordinates (tolerance applied). */
   polygon: Point[]
   depthMm: number
+}
+
+/** Checks a closed polygon for non-adjacent edge intersections. */
+function isSelfIntersecting(pts: Point[]): boolean {
+  const n = pts.length
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue // adjacent wrap edges
+      if (segmentsIntersect(pts[i], pts[(i + 1) % n], pts[j], pts[(j + 1) % n])) return true
+    }
+  }
+  return false
 }
 
 /** Triangulates a horizontal face (outer polygon + holes) at height z. */
@@ -209,6 +221,12 @@ function ring(mesh: MeshBuilder, outer: Point[], inner: Point[], z: number, hint
   }
 }
 
+export interface BinMesh {
+  triangles: Triangle[]
+  /** Pockets skipped during construction (degenerate or corner conflicts). */
+  warnings: string[]
+}
+
 /**
  * Builds a Gridfinity bin mesh with pocket wells per tool.
  *
@@ -219,8 +237,9 @@ function ring(mesh: MeshBuilder, outer: Point[], inner: Point[], z: number, hint
  * would print as an unsupported floating bridge. With no tools, an open
  * (hollow) bin is produced instead.
  */
-export function buildBinMesh(tray: TrayConfig, tools: ToolTrace[]): Triangle[] {
+export function buildBinMesh(tray: TrayConfig, tools: ToolTrace[]): BinMesh {
   const mesh = new MeshBuilder()
+  const warnings: string[] = []
   const C = GF.CLEARANCE / 2
   const W = tray.widthUnits * GF.PITCH - GF.CLEARANCE
   const H = tray.heightUnits * GF.PITCH - GF.CLEARANCE
@@ -237,11 +256,63 @@ export function buildBinMesh(tray: TrayConfig, tools: ToolTrace[]): Triangle[] {
   const iLip = rimProfile(GF.LIP_TAPER, GF.WALL_T, tray.widthUnits, tray.heightUnits)
 
   // Pockets: transformed outlines + fit tolerance offset, shifted into bin
-  // coordinates, depth clamped so the floor stays 1 mm above the cavity floor.
-  const pockets: Pocket[] = tools.map((t) => ({
-    polygon: offsetPolygon(toolPoints(t), t.toleranceMm).map((p) => ({ x: p.x - C, y: p.y - C })),
-    depthMm: Math.min(t.pocketDepthMm, cavityH - 1),
-  }))
+  // coordinates, then cleaned (traced outlines can carry duplicate/collinear
+  // points) and clipped inside the inner wall with a printable clearance so
+  // the deck triangulation stays valid (no micron-wide slivers at the wall).
+  // Pockets reaching into a rounded inner corner zone are skipped with a
+  // warning (moving the tool slightly off the corner fixes it) — the rounded
+  // corner can't be represented by the rect clip.
+  const MARGIN = 0.4
+  const innerR = R - GF.WALL_T
+  const ix0 = C + GF.WALL_T + MARGIN
+  const iy0 = C + GF.WALL_T + MARGIN
+  const ix1 = C + W - GF.WALL_T - MARGIN
+  const iy1 = C + H - GF.WALL_T - MARGIN
+  const iw0 = C + GF.WALL_T
+  const iw1 = C + W - GF.WALL_T
+  const ih0 = C + GF.WALL_T
+  const ih1 = C + H - GF.WALL_T
+  const cornerZones: Point[][] = ([
+    [iw0, ih0, iw0 + innerR + MARGIN, ih0 + innerR + MARGIN], // TL
+    [iw1 - innerR - MARGIN, ih0, iw1, ih0 + innerR + MARGIN], // TR
+    [iw0, ih1 - innerR - MARGIN, iw0 + innerR + MARGIN, ih1], // BL
+    [iw1 - innerR - MARGIN, ih1 - innerR - MARGIN, iw1, ih1], // BR
+  ] as const).map(([x0, y0, x1, y1]) => [
+    { x: x0, y: y0 },
+    { x: x1, y: y0 },
+    { x: x1, y: y1 },
+    { x: x0, y: y1 },
+  ])
+  const hitsCornerZone = (poly: Point[]): boolean =>
+    cornerZones.some((zone) => {
+      if (poly.some((p) => pointInPolygon(p, zone))) return true
+      for (let i = 0; i < poly.length; i++) {
+        for (let j = 0; j < zone.length; j++) {
+          if (segmentsIntersect(poly[i], poly[(i + 1) % poly.length], zone[j], zone[(j + 1) % zone.length])) return true
+        }
+      }
+      return false
+    })
+
+  const pockets: Pocket[] = []
+  for (const t of tools) {
+    const base = toolPoints(t)
+    // The naive miter offset can self-intersect on concave outlines; fall
+    // back to the un-offset outline if it does.
+    let polygon = offsetPolygon(base, t.toleranceMm)
+    if (isSelfIntersecting(polygon)) polygon = base
+    polygon = polygon.map((p) => ({ x: p.x - C, y: p.y - C }))
+    polygon = cleanPolygon(clipPolygonToRect(polygon, ix0, iy0, ix1, iy1))
+    if (polygon.length < 3 || isSelfIntersecting(polygon)) {
+      warnings.push(`"${t.label}" was skipped (outline too small or self-intersecting)`)
+      continue
+    }
+    if (hitsCornerZone(polygon)) {
+      warnings.push(`"${t.label}" was skipped (too close to a rounded inner corner — nudge it away from the tray corner)`)
+      continue
+    }
+    pockets.push({ polygon, depthMm: Math.min(t.pocketDepthMm, cavityH - 1) })
+  }
 
   // --- underside: per-cell chamfered base blocks (V-groove grid) ---
   // Each cell gets a block chamfered on all 4 edges; blocks fuse above the
@@ -311,7 +382,7 @@ export function buildBinMesh(tray: TrayConfig, tools: ToolTrace[]): Triangle[] {
     // Open bin: hollow cavity down to the base top, inner walls up to the deck.
     face(mesh, [iMain], GF.BASE_H, { x: 0, y: 0, z: 1 })
     loft(mesh, iMain, iMain, GF.BASE_H, deckZ, true)
-    return mesh.triangles
+    return { triangles: mesh.triangles, warnings }
   }
 
   // Solid interior from the base up to the deck — only the pocket wells are
@@ -331,5 +402,5 @@ export function buildBinMesh(tray: TrayConfig, tools: ToolTrace[]): Triangle[] {
     face(mesh, [p.polygon], floorZ, { x: 0, y: 0, z: 1 })
   }
 
-  return mesh.triangles
+  return { triangles: mesh.triangles, warnings }
 }

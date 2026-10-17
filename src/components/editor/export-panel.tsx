@@ -19,9 +19,12 @@ export function ExportPanel() {
     // Let the UI paint the busy state before the (synchronous) mesh build.
     setTimeout(() => {
       try {
-        const triangles = buildBinMesh(tray, tools)
+        const { triangles, warnings } = buildBinMesh(tray, tools)
         downloadStl(triangles, `gridfinity-${tray.widthUnits}x${tray.heightUnits}-tray.stl`)
-        setStats(`${triangles.length.toLocaleString()} triangles`)
+        setStats(
+          `${triangles.length.toLocaleString()} triangles` +
+            (warnings.length ? ` — ${warnings.join('; ')}` : ''),
+        )
       } finally {
         setBusy(false)
       }

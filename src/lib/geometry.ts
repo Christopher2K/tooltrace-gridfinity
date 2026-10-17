@@ -91,6 +91,72 @@ export function outlinePath(outline: Point[], curves?: Record<number, Point>): s
   return d + ' Z'
 }
 
+/**
+ * Removes consecutive near-duplicate points and collinear middle points from
+ * a closed polygon. Degenerate input like this (from traced/simplified
+ * outlines) produces zero-length mesh edges and open seams.
+ */
+export function cleanPolygon(pts: Point[], minDist = 0.05): Point[] {
+  if (pts.length < 3) return pts
+  // Pass 1: drop near-duplicate consecutive points (incl. wrap-around).
+  const deduped: Point[] = []
+  for (const p of pts) {
+    const last = deduped[deduped.length - 1]
+    if (!last || Math.hypot(p.x - last.x, p.y - last.y) > minDist) deduped.push(p)
+  }
+  if (deduped.length > 1) {
+    const first = deduped[0]
+    const last = deduped[deduped.length - 1]
+    if (Math.hypot(first.x - last.x, first.y - last.y) <= minDist) deduped.pop()
+  }
+  // Pass 2: drop collinear middle points.
+  const out: Point[] = []
+  for (let i = 0; i < deduped.length; i++) {
+    const prev = deduped[(i - 1 + deduped.length) % deduped.length]
+    const cur = deduped[i]
+    const next = deduped[(i + 1) % deduped.length]
+    const cross = (cur.x - prev.x) * (next.y - cur.y) - (cur.y - prev.y) * (next.x - cur.x)
+    const len =
+      (Math.hypot(cur.x - prev.x, cur.y - prev.y) * Math.hypot(next.x - cur.x, next.y - cur.y)) || 1
+    if (Math.abs(cross) / len > 1e-4) out.push(cur)
+  }
+  return out.length >= 3 ? out : deduped
+}
+
+/** Sutherland–Hodgman clip of a polygon to an axis-aligned rectangle. */
+export function clipPolygonToRect(pts: Point[], x0: number, y0: number, x1: number, y1: number): Point[] {
+  let poly = clipPolygonToPlane(pts, -1, 0, -x0)
+  poly = clipPolygonToPlane(poly, 1, 0, x1)
+  poly = clipPolygonToPlane(poly, 0, -1, -y0)
+  poly = clipPolygonToPlane(poly, 0, 1, y1)
+  return poly
+}
+
+/** Clips a polygon to the half-plane nx·x + ny·y ≤ d. */
+export function clipPolygonToPlane(pts: Point[], nx: number, ny: number, d: number): Point[] {
+  const inside = (p: Point) => nx * p.x + ny * p.y <= d + 1e-9
+  const intersect = (a: Point, b: Point): Point => {
+    const da = nx * a.x + ny * a.y - d
+    const db = nx * b.x + ny * b.y - d
+    const t = da / (da - db || 1e-12)
+    return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }
+  }
+  const out: Point[] = []
+  for (let i = 0; i < pts.length; i++) {
+    const cur = pts[i]
+    const prev = pts[(i - 1 + pts.length) % pts.length]
+    const curIn = inside(cur)
+    const prevIn = inside(prev)
+    if (curIn) {
+      if (!prevIn) out.push(intersect(prev, cur))
+      out.push(cur)
+    } else if (prevIn) {
+      out.push(intersect(prev, cur))
+    }
+  }
+  return out
+}
+
 /** Finds the nearest edge to a local point and the projected point on it. */
 export function nearestEdgeProjection(
   tool: ToolTrace,
