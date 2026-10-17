@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { css } from '~/styled-system/css'
-import { IconButton } from '~/components/ui'
+import { Button, IconButton } from '~/components/ui'
 import { bboxCenter, bboxOf, offsetPolygon, rotatePoint } from '~/lib/geometry'
 import { GRID_UNIT_MM, useEditorStore, type Point, type ToolTrace } from '~/stores/editor'
 
@@ -27,7 +27,29 @@ const toolPolySelected = css({
 })
 const toleranceLine = css({ fill: 'none', stroke: 'grass.8', strokeDasharray: '2 2', pointerEvents: 'none' })
 const vertexHandle = css({ fill: 'bg.default', stroke: 'grass.9', cursor: 'move' })
-const fitBtn = css({ position: 'absolute', top: '2', right: '2' })
+const zoomControls = css({
+  position: 'absolute',
+  bottom: '3',
+  right: '3',
+  display: 'flex',
+  alignItems: 'center',
+  gap: '1',
+  bg: 'bg.default',
+  borderWidth: '1px',
+  borderColor: 'border',
+  borderRadius: 'l2',
+  p: '1',
+  shadow: 'sm',
+})
+const zoomPct = css({
+  minW: '12',
+  textAlign: 'center',
+  cursor: 'pointer',
+  borderRadius: 'l1',
+  px: '1',
+  py: '0.5',
+  _hover: { bg: 'gray.a2' },
+})
 
 export function EditorCanvas() {
   const tools = useEditorStore((s) => s.tools)
@@ -62,28 +84,56 @@ export function EditorCanvas() {
     return { x, y, w, h }
   }
 
+  const MIN_VIEW_W = 20 // mm — max zoom in
+  const MAX_VIEW_W = 2500 // mm — max zoom out, keeps content findable
+
+  /** Zoom by `factor` around a point given in mm view coordinates (default: view center). */
+  function zoomBy(factor: number, centerMm?: Point) {
+    setView((cur) => {
+      const v = cur ?? computeFit()
+      const cx = centerMm?.x ?? v.x + v.w / 2
+      const cy = centerMm?.y ?? v.y + v.h / 2
+      const clamped = Math.min(Math.max(v.w * factor, MIN_VIEW_W), MAX_VIEW_W) / v.w
+      return {
+        x: cx - (cx - v.x) * clamped,
+        y: cy - (cy - v.y) * clamped,
+        w: v.w * clamped,
+        h: v.h * clamped,
+      }
+    })
+  }
+
   // Fit view on mount and when the first tools arrive.
   useEffect(() => {
     setView((v) => (v === null ? computeFit() : v))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tools.length === 0])
 
-  // Non-passive wheel zoom centered on the cursor.
+  // Figma-style controls (non-passive wheel):
+  //   scroll        → pan (Shift = horizontal)
+  //   pinch / ⌃+scroll → smooth zoom around cursor, dampened & clamped
   useEffect(() => {
     const el = svgRef.current
     if (!el || !view) return
+    const ZOOM_INTENSITY = 0.0025
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
       const rect = el.getBoundingClientRect()
-      const mx = view.x + ((e.clientX - rect.left) / rect.width) * view.w
-      const my = view.y + ((e.clientY - rect.top) / rect.height) * view.h
-      const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15
-      setView({
-        x: mx - (mx - view.x) * factor,
-        y: my - (my - view.y) * factor,
-        w: Math.min(Math.max(view.w * factor, 40), 3000),
-        h: Math.min(Math.max(view.h * factor, 40), 3000),
-      })
+      if (e.ctrlKey || e.metaKey) {
+        // Pinch gesture (trackpad) or Ctrl+wheel (mouse) → zoom
+        const mx = view.x + ((e.clientX - rect.left) / rect.width) * view.w
+        const my = view.y + ((e.clientY - rect.top) / rect.height) * view.h
+        zoomBy(Math.exp(e.deltaY * ZOOM_INTENSITY), { x: mx, y: my })
+      } else {
+        // Scroll → pan
+        const dxMm = (e.deltaX / rect.width) * view.w
+        const dyMm = (e.deltaY / rect.height) * view.h
+        setView({
+          ...view,
+          x: view.x + (e.shiftKey ? dyMm : dxMm),
+          y: view.y + (e.shiftKey ? dxMm : dyMm),
+        })
+      }
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
@@ -204,14 +254,28 @@ export function EditorCanvas() {
         borderColor: 'border',
         borderRadius: 'l3',
         overflow: 'hidden',
+        h: '[calc(100vh - 140px)]',
         minH: '480px',
         bg: 'gray.a1',
       })}
     >
-      <div className={fitBtn}>
-        <IconButton size="sm" variant="outline" aria-label="Fit view" onClick={() => setView(computeFit())}>
-          Fit
+      <div className={zoomControls}>
+        <IconButton size="xs" variant="plain" aria-label="Zoom out" onClick={() => zoomBy(1 / 0.8)}>
+          −
         </IconButton>
+        <button
+          className={zoomPct}
+          title="Zoom to fit"
+          onClick={() => setView(computeFit())}
+        >
+          {Math.round((computeFit().w / v.w) * 100)}%
+        </button>
+        <IconButton size="xs" variant="plain" aria-label="Zoom in" onClick={() => zoomBy(0.8)}>
+          +
+        </IconButton>
+        <Button size="xs" variant="outline" onClick={() => setView(computeFit())}>
+          Fit
+        </Button>
       </div>
       <svg
         ref={svgRef}
