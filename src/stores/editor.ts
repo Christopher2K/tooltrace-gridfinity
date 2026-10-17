@@ -24,6 +24,11 @@ export interface ToolTrace {
   pocketDepthMm: number
   /** True for generated shapes (rect/circle/notch) rather than traced tools. */
   isShape?: boolean
+  /**
+   * Optional curved edges: maps edge index i (vertex i → vertex i+1, wrapping)
+   * to a quadratic Bézier control point in tool-local mm.
+   */
+  curves?: Record<number, Point>
 }
 
 export interface TrayConfig {
@@ -168,6 +173,7 @@ export const useEditorStore = create<EditorState>()(
             id: crypto.randomUUID(),
             label: `${src.label} copy`,
             outline: src.outline.map((p) => ({ ...p })),
+            curves: src.curves ? { ...src.curves } : undefined,
             position: { x: src.position.x + 10, y: src.position.y + 10 },
           }
           return { tools: [...s.tools, copy], selectedToolId: copy.id, ...record(s) }
@@ -184,12 +190,12 @@ export const useEditorStore = create<EditorState>()(
           tools: s.tools.map((t) => {
             if (t.id !== id) return t
             const b = bboxOf(t.outline)
-            return {
-              ...t,
-              outline: t.outline.map((p) =>
-                axis === 'x' ? { x: b.w - p.x, y: p.y } : { x: p.x, y: b.h - p.y },
-              ),
-            }
+            const mirror = (p: Point) =>
+              axis === 'x' ? { x: b.w - p.x, y: p.y } : { x: p.x, y: b.h - p.y }
+            const curves = t.curves
+              ? Object.fromEntries(Object.entries(t.curves).map(([k, c]) => [k, mirror(c)]))
+              : t.curves
+            return { ...t, outline: t.outline.map(mirror), curves }
           }),
           ...record(s),
         })),

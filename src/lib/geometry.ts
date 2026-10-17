@@ -41,11 +41,91 @@ export function rotatePoint(p: Point, center: Point, deg: number): Point {
 
 /** Tool outline in tray coordinates (position + rotation about bbox center applied). */
 export function toolPoints(tool: ToolTrace): Point[] {
-  const c = bboxCenter(tool.outline)
-  return tool.outline.map((p) => {
+  const flat = flattenOutline(tool)
+  const c = bboxCenter(flat)
+  return flat.map((p) => {
     const r = tool.rotationDeg ? rotatePoint(p, c, tool.rotationDeg) : p
     return { x: r.x + tool.position.x, y: r.y + tool.position.y }
   })
+}
+
+/** Point on a quadratic Bézier at t ∈ [0,1]. */
+export function quadPoint(p0: Point, c: Point, p1: Point, t: number): Point {
+  const u = 1 - t
+  return {
+    x: u * u * p0.x + 2 * u * t * c.x + t * t * p1.x,
+    y: u * u * p0.y + 2 * u * t * c.y + t * t * p1.y,
+  }
+}
+
+/** Outline with curved edges subdivided into straight segments (tool-local coords). */
+export function flattenOutline(tool: ToolTrace, segmentsPerCurve = 12): Point[] {
+  if (!tool.curves || Object.keys(tool.curves).length === 0) return tool.outline
+  const n = tool.outline.length
+  const out: Point[] = []
+  for (let i = 0; i < n; i++) {
+    const p0 = tool.outline[i]
+    const p1 = tool.outline[(i + 1) % n]
+    const c = tool.curves[i]
+    out.push(p0)
+    if (c) {
+      for (let k = 1; k < segmentsPerCurve; k++) {
+        out.push(quadPoint(p0, c, p1, k / segmentsPerCurve))
+      }
+    }
+  }
+  return out
+}
+
+/** SVG path data for an outline with optional quadratic curve edges. */
+export function outlinePath(outline: Point[], curves?: Record<number, Point>): string {
+  if (outline.length === 0) return ''
+  const n = outline.length
+  let d = `M ${outline[0].x} ${outline[0].y}`
+  for (let i = 0; i < n; i++) {
+    const next = outline[(i + 1) % n]
+    const c = curves?.[i]
+    if (c) d += ` Q ${c.x} ${c.y} ${next.x} ${next.y}`
+    else d += ` L ${next.x} ${next.y}`
+  }
+  return d + ' Z'
+}
+
+/** Sets or clears the curve on edge i. Returns the patch for updateTool. */
+export function setEdgeCurve(tool: ToolTrace, edge: number, control: Point | null): Partial<ToolTrace> {
+  const curves = { ...(tool.curves ?? {}) }
+  if (control) curves[edge] = control
+  else delete curves[edge]
+  return { curves: Object.keys(curves).length > 0 ? curves : undefined }
+}
+
+/** Inserts a vertex on edge i. Any curve on that edge is straightened. */
+export function insertVertex(tool: ToolTrace, edge: number, p: Point): Partial<ToolTrace> {
+  const outline = [...tool.outline.slice(0, edge + 1), p, ...tool.outline.slice(edge + 1)]
+  const curves: Record<number, Point> = {}
+  for (const [k, c] of Object.entries(tool.curves ?? {})) {
+    const i = Number(k)
+    if (i < edge) curves[i] = c
+    else if (i > edge) curves[i + 1] = c
+    // curve on the split edge is dropped
+  }
+  return { outline, curves: Object.keys(curves).length > 0 ? curves : undefined }
+}
+
+/** Removes vertex i (keeps at least 3 vertices). Curves on adjacent edges are dropped. */
+export function removeVertex(tool: ToolTrace, index: number): Partial<ToolTrace> | null {
+  const n = tool.outline.length
+  if (n <= 3) return null
+  const outline = tool.outline.filter((_, i) => i !== index)
+  const curves: Record<number, Point> = {}
+  for (const [k, c] of Object.entries(tool.curves ?? {})) {
+    const i = Number(k)
+    // Old edge i connects v_i → v_{i+1}. Edges touching the removed vertex are dropped.
+    if (i === index || i === (index - 1 + n) % n) continue
+    const newIdx = i > index ? i - 1 : i
+    curves[newIdx] = c
+  }
+  return { outline, curves: Object.keys(curves).length > 0 ? curves : undefined }
 }
 
 /**

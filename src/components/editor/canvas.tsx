@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Redo2, Undo2 } from 'lucide-react'
 import { css } from '~/styled-system/css'
 import { Button, IconButton } from '~/components/ui'
-import { bboxCenter, bboxOf, offsetPolygon, rotatePoint } from '~/lib/geometry'
+import { bboxCenter, bboxOf, flattenOutline, insertVertex, offsetPolygon, outlinePath, quadPoint, removeVertex, rotatePoint, setEdgeCurve } from '~/lib/geometry'
 import { GRID_UNIT_MM, useEditorStore, type Point, type ToolTrace } from '~/stores/editor'
 
 interface View {
@@ -28,6 +28,7 @@ const toolPolySelected = css({
 })
 const toleranceLine = css({ fill: 'none', stroke: 'grass.8', strokeDasharray: '2 2', pointerEvents: 'none' })
 const vertexHandle = css({ fill: 'bg.default', stroke: 'grass.9', cursor: 'move' })
+const midHandle = css({ fill: 'grass.a4', stroke: 'grass.8', cursor: 'copy' })
 const zoomControls = css({
   position: 'absolute',
   bottom: '3',
@@ -216,16 +217,19 @@ export function EditorCanvas() {
     window.addEventListener('pointercancel', up)
   }
 
+  /** Converts tray mm → tool-local mm (undo position + rotation). */
+  function toLocal(tool: ToolTrace, trayP: Point): Point {
+    const c = bboxCenter(tool.outline)
+    const shifted = { x: trayP.x - tool.position.x, y: trayP.y - tool.position.y }
+    return tool.rotationDeg ? rotatePoint(shifted, c, -tool.rotationDeg) : shifted
+  }
+
   // --- vertex drag (edit mode) ---
   function onVertexPointerDown(e: React.PointerEvent, tool: ToolTrace, index: number) {
     e.stopPropagation()
     beginTransient()
-    const c = bboxCenter(tool.outline)
     const move = (ev: PointerEvent) => {
-      const trayP = toMm(ev)
-      // Convert tray coords → tool-local coords (undo position + rotation).
-      const shifted = { x: trayP.x - tool.position.x, y: trayP.y - tool.position.y }
-      const local = tool.rotationDeg ? rotatePoint(shifted, c, -tool.rotationDeg) : shifted
+      const local = toLocal(tool, toMm(ev))
       const outline = tool.outline.map((p, i) =>
         i === index ? { x: Math.round(local.x * 10) / 10, y: Math.round(local.y * 10) / 10 } : p,
       )
@@ -239,6 +243,41 @@ export function EditorCanvas() {
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
     window.addEventListener('pointercancel', up)
+  }
+
+  /** Double-click a vertex → delete it (keeps ≥ 3 vertices). */
+  function onVertexDoubleClick(e: React.MouseEvent, tool: ToolTrace, index: number) {
+    e.stopPropagation()
+    const patch = removeVertex(tool, index)
+    if (patch) updateTool(tool.id, patch)
+  }
+
+  // --- edge midpoint: drag pulls a curve, double-click inserts a vertex ---
+  function onMidPointerDown(e: React.PointerEvent, tool: ToolTrace, edge: number) {
+    e.stopPropagation()
+    beginTransient()
+    const move = (ev: PointerEvent) => {
+      const local = toLocal(tool, toMm(ev))
+      updateToolTransient(tool.id, setEdgeCurve(tool, edge, local))
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+  }
+
+  function onMidDoubleClick(e: React.MouseEvent, tool: ToolTrace, edge: number) {
+    e.stopPropagation()
+    const n = tool.outline.length
+    const p0 = tool.outline[edge]
+    const p1 = tool.outline[(edge + 1) % n]
+    const c = tool.curves?.[edge]
+    const mid = c ? quadPoint(p0, c, p1, 0.5) : { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 }
+    updateTool(tool.id, insertVertex(tool, edge, mid))
   }
 
   const v = view ?? computeFit()
@@ -307,41 +346,70 @@ export function EditorCanvas() {
         {tools.map((tool) => {
           const c = bboxCenter(tool.outline)
           const transform = `translate(${tool.position.x} ${tool.position.y}) rotate(${tool.rotationDeg} ${c.x} ${c.y})`
-          const points = tool.outline.map((p) => `${p.x},${p.y}`).join(' ')
           const selected = tool.id === selectedToolId
+          const editing = editingId === tool.id
+          const handleR = Math.max(v.w, v.h) * 0.006
           return (
             <g key={tool.id} transform={transform}>
               {tool.toleranceMm > 0 && (
                 <polygon
-                  points={offsetPolygon(tool.outline, tool.toleranceMm).map((p) => `${p.x},${p.y}`).join(' ')}
+                  points={offsetPolygon(flattenOutline(tool), tool.toleranceMm)
+                    .map((p) => `${p.x},${p.y}`)
+                    .join(' ')}
                   className={toleranceLine}
                   strokeWidth={0.4}
                 />
               )}
-              <polygon
-                points={points}
+              <path
+                d={outlinePath(tool.outline, tool.curves)}
                 onPointerDown={(e) => onToolPointerDown(e, tool)}
                 onDoubleClick={(e) => {
                   e.stopPropagation()
                   selectTool(tool.id)
-                  setEditingId(editingId === tool.id ? null : tool.id)
+                  setEditingId(editing ? null : tool.id)
                 }}
                 className={selected ? toolPolySelected : toolPoly}
                 strokeWidth={0.5}
                 strokeLinejoin="round"
               />
-              {editingId === tool.id &&
-                tool.outline.map((p, i) => (
-                  <circle
-                    key={i}
-                    cx={p.x}
-                    cy={p.y}
-                    r={Math.max(v.w, v.h) * 0.006}
-                    className={vertexHandle}
-                    strokeWidth={0.4}
-                    onPointerDown={(e) => onVertexPointerDown(e, tool, i)}
-                  />
-                ))}
+              {editing && (
+                <>
+                  {/* Edge midpoints: drag to curve, double-click to insert vertex */}
+                  {tool.outline.map((p, i) => {
+                    const n = tool.outline.length
+                    const p1 = tool.outline[(i + 1) % n]
+                    const curve = tool.curves?.[i]
+                    const mid = curve
+                      ? quadPoint(p, curve, p1, 0.5)
+                      : { x: (p.x + p1.x) / 2, y: (p.y + p1.y) / 2 }
+                    return (
+                      <circle
+                        key={`m${i}`}
+                        cx={mid.x}
+                        cy={mid.y}
+                        r={handleR * 0.75}
+                        className={midHandle}
+                        strokeWidth={0.4}
+                        onPointerDown={(e) => onMidPointerDown(e, tool, i)}
+                        onDoubleClick={(e) => onMidDoubleClick(e, tool, i)}
+                      />
+                    )
+                  })}
+                  {/* Vertices: drag to move, double-click to delete */}
+                  {tool.outline.map((p, i) => (
+                    <circle
+                      key={i}
+                      cx={p.x}
+                      cy={p.y}
+                      r={handleR}
+                      className={vertexHandle}
+                      strokeWidth={0.4}
+                      onPointerDown={(e) => onVertexPointerDown(e, tool, i)}
+                      onDoubleClick={(e) => onVertexDoubleClick(e, tool, i)}
+                    />
+                  ))}
+                </>
+              )}
             </g>
           )
         })}
