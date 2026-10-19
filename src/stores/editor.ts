@@ -63,6 +63,8 @@ interface EditorState {
   setTrayConfig: (config: Partial<TrayConfig>) => void
   addTool: (tool: ToolTrace) => void
   setTools: (tools: ToolTrace[]) => void
+  /** Replaces tray + tools in one history entry (project file load). */
+  loadProject: (tray: TrayConfig, tools: ToolTrace[]) => void
   addShape: (kind: ShapeKind, at?: Point) => void
   updateTool: (id: string, patch: Partial<ToolTrace>) => void
   /** Like updateTool but without recording history — use inside drag gestures. */
@@ -126,6 +128,8 @@ export const useEditorStore = create<EditorState>()(
       setTrayConfig: (config) => set((s) => ({ tray: { ...s.tray, ...config }, ...record(s) })),
       addTool: (tool) => set((s) => ({ tools: [...s.tools, tool], ...record(s) })),
       setTools: (tools) => set((s) => ({ tools, selectedToolId: null, ...record(s) })),
+      loadProject: (tray, tools) =>
+        set((s) => ({ tray, tools, selectedToolId: null, ...record(s) })),
       addShape: (kind, at) =>
         set((s) => {
           const outline = shapeOutlines[kind]()
