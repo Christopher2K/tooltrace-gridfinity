@@ -1,5 +1,5 @@
 {
-  "name": "gridfinity-tooltrace",
+  "name": "3d-print-grid-helpers",
   "private": true,
   "sideEffects": false,
   "type": "module",
