@@ -14,15 +14,14 @@ import sharp from 'sharp'
  * Runs wherever the app server runs — when self-hosted, photos never leave
  * the owner's machine.
  */
-export async function convertHeicToJpeg(input: Uint8Array): Promise<Uint8Array> {
+export async function convertHeicToJpeg(input: Uint8Array): Promise<Buffer> {
   const { width, height, data } = await decode({ buffer: input })
   if (!width || !height || !data?.length) {
     throw new Error('HEIC decoded to an empty image')
   }
-  const jpeg = await sharp(Buffer.from(data.buffer, data.byteOffset, data.byteLength), {
+  return sharp(Buffer.from(data.buffer, data.byteOffset, data.byteLength), {
     raw: { width, height, channels: 4 },
   })
     .jpeg({ quality: 92 })
     .toBuffer()
-  return new Uint8Array(jpeg)
 }
