@@ -58,6 +58,12 @@ export default defineConfig({
           grass,
           red,
           gray: sand,
+          bg: {
+            canvas: { value: { _light: '{colors.gray.1}', _dark: '{colors.gray.1}' } },
+            default: { value: { _light: '{colors.white}', _dark: '{colors.white}' } },
+            subtle: { value: { _light: '{colors.gray.2}', _dark: '{colors.gray.2}' } },
+            muted: { value: { _light: '{colors.gray.3}', _dark: '{colors.gray.3}' } },
+          },
           fg: {
             default: { value: { _light: '{colors.gray.12}', _dark: '{colors.gray.12}' } },
             muted: { value: { _light: '{colors.gray.11}', _dark: '{colors.gray.11}' } },
