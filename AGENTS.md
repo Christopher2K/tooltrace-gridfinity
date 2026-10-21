@@ -14,12 +14,12 @@ milestones (M1–M4).
 - **Styling:** Panda CSS v2 (build-time CSS-in-JS) + Park UI component recipes
 - **UI primitives:** Park UI components (`src/components/ui`, built on Ark UI + Lucide icons)
 - **Client state:** Zustand (`src/stores/`)
-- **CV pipeline:** `src/lib/vision.ts` — pure Canvas2D/JS (Otsu paper split, shadow-robust
-  adaptive tool mask via local contrast + Sobel edge gate, connected components, homography
-  rectify, Moore contour tracing, RDP simplification). No WASM/OpenCV — the bundled OpenCV.js
-  builds blocked the main thread indefinitely in this setup. HEIC photos are converted
+- **CV pipeline:** `src/lib/vision.ts` — pure Canvas2D/JS (Otsu threshold, connected components,
+  homography rectify, Moore contour tracing, RDP simplification). No WASM/OpenCV — the bundled
+  OpenCV.js builds blocked the main thread indefinitely in this setup. HEIC photos are converted
   server-side (`POST /api/convert-heic`, libheif 1.19 via heic-decode + sharp). A Python CV
-  sidecar may be introduced later for harder cases.
+  sidecar may be introduced later for harder cases (e.g. cast shadows on the sheet — the
+  threshold pipeline can't separate them from dark tools).
 
 ## Commands
 
