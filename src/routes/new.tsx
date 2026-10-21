@@ -6,7 +6,7 @@ import { Button, Card, FileUpload, Heading, Slider, Spinner, Switch, Text } from
 import { downloadPdf, type PaperSize } from '~/lib/pdf'
 import { generateTemplatePdf } from '~/lib/template'
 import { convertIfHeic } from '~/lib/heic'
-import { detectInScan, prepareScan, setTemplatePaperSize, type PreparedScan, type QuadSource } from '~/lib/vision'
+import { detectInScan, getTemplatePaperSize, prepareScan, setTemplatePaperSize, type PreparedScan, type QuadSource } from '~/lib/vision'
 import type { Point, ToolTrace } from '~/stores/editor'
 import { useEditorStore } from '~/stores/editor'
 
@@ -43,12 +43,14 @@ function NewTrace() {
   const [manual, setManual] = useState<{ file: File; url: string; points: Point[] } | null>(null)
   const [manualImgSize, setManualImgSize] = useState<{ w: number; h: number } | null>(null)
   const [lastFile, setLastFile] = useState<File | null>(null)
+  /** The (possibly HEIC-converted) file behind the current scan — for paper-size re-runs. */
+  const [scanFile, setScanFile] = useState<File | null>(null)
   const setTools = useEditorStore((s) => s.setTools)
   const navigate = useNavigate()
   const cameraRef = useRef<HTMLInputElement>(null)
   const detectTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  async function runDetection(file: File, manualQuad?: Point[]) {
+  async function runDetection(file: File, manualQuad?: Point[], paperSize?: PaperSize) {
     setProcessing(true)
     setError(null)
     setScan(null)
@@ -59,12 +61,16 @@ function NewTrace() {
       setConverting(true)
       converted = await convertIfHeic(file)
       setConverting(false)
-      const prepared = await prepareScan(converted, manualQuad ? { manualQuad } : {})
+      const prepared = await prepareScan(converted, {
+        ...(manualQuad ? { manualQuad } : {}),
+        ...(paperSize ? { paperSize } : {}),
+      })
       const { tools, toolMaskUrl } = detectInScan(prepared)
       if (tools.length === 0) {
         throw new Error('No tools detected. Use a plain white sheet and dark, contrasting tools.')
       }
       setScan(prepared)
+      setScanFile(converted)
       setDetected(tools)
       setMaskUrl(toolMaskUrl)
       setThresholdOffset(0)
@@ -99,6 +105,12 @@ function NewTrace() {
     setTemplatePaperSize(paper)
     const bytes = await generateTemplatePdf(paper)
     downloadPdf(bytes, `tooltrace-reference-sheet-${paper}.pdf`)
+  }
+
+  async function changeTemplatePaper(paper: PaperSize) {
+    // Tell us which template you printed — re-rectify with the exact sheet dims.
+    setTemplatePaperSize(paper)
+    if (scanFile && !processing) await runDetection(scanFile, undefined, paper)
   }
 
   // Re-detect (debounced) whenever the user adjusts sensitivity/detail.
@@ -353,6 +365,24 @@ function NewTrace() {
               </Text>
 
               <div className={css({ display: 'flex', gap: '6', flexWrap: 'wrap' })}>
+                {scan.quadSource === 'markers' && (
+                  <div className={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+                    <Text textStyle="sm" color="fg.muted">
+                      Printed sheet:
+                    </Text>
+                    {(['a4', 'letter'] as const).map((p) => (
+                      <Button
+                        key={p}
+                        size="xs"
+                        variant={getTemplatePaperSize() === p ? 'solid' : 'outline'}
+                        disabled={processing}
+                        onClick={() => changeTemplatePaper(p)}
+                      >
+                        {p === 'a4' ? 'A4' : 'Letter'}
+                      </Button>
+                    ))}
+                  </div>
+                )}
                 <Switch.Root
                   className={css({ display: 'flex', alignItems: 'center', gap: '2' })}
                   checked={highDetail}

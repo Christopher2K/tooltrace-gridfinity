@@ -1,6 +1,58 @@
 import { describe, expect, it } from 'vitest'
-import { applyH, homography, otsuThreshold, simplify } from '~/lib/vision'
+import { adaptiveToolMask, applyH, homography, otsuThreshold, simplify } from '~/lib/vision'
 import type { Point } from '~/stores/editor'
+
+describe('adaptiveToolMask (shadow rejection)', () => {
+  // 200×200 sheet at ~235. A light-gray tool (like the DJI gimbal: ~165) with a
+  // genuinely SOFT shadow beside it (235→200 over 40px, like a blurred cast shadow),
+  // plus a dark tool.
+  const W = 200
+  const H = 200
+  function scene(): Uint8Array {
+    const img = new Uint8Array(W * H).fill(235)
+    // soft shadow: rows 40-120; ramps 235→200 across cols 100-139, flat 200 to col 190
+    for (let y = 40; y < 120; y++) {
+      for (let x = 100; x < 190; x++) {
+        const d = Math.min(1, (x - 100) / 40)
+        img[y * W + x] = Math.round(235 - 35 * d)
+      }
+    }
+    // light-gray tool (rows 40-120, cols 30-95) — hard edges
+    for (let y = 40; y < 120; y++) for (let x = 30; x < 95; x++) img[y * W + x] = 165
+    // dark tool (rows 140-180, cols 30-70)
+    for (let y = 140; y < 180; y++) for (let x = 30; x < 70; x++) img[y * W + x] = 60
+    return img
+  }
+  const OPTS = { radius: 20, contrast: 16, gradMin: 28 }
+
+  it('keeps light-gray tools but rejects soft shadows', () => {
+    const mask = adaptiveToolMask(scene(), W, H, OPTS)
+    // Tool edge pixels flagged (interior may be a hole — fillHoles handles it)
+    expect(mask[80 * W + 30]).toBe(1) // light tool, ON its left edge (mask = edge ring)
+    expect(mask[145 * W + 30]).toBe(1) // dark tool, on its left edge
+    // Shadow rejected everywhere — even its darkest, hardest part
+    for (let x = 100; x < 190; x += 5) {
+      expect(mask[80 * W + x]).toBe(0)
+    }
+    // Paper untouched
+    expect(mask[10 * W + 10]).toBe(0)
+  })
+
+  it('higher contrast rejects a light tool (sensitivity tradeoff)', () => {
+    const mask = adaptiveToolMask(scene(), W, H, { ...OPTS, contrast: 90 })
+    expect(mask[80 * W + 30]).toBe(0) // light tool (Δ≈70) now rejected
+    expect(mask[145 * W + 30]).toBe(1) // dark tool still caught
+  })
+
+  it('a HARD dark shadow edge passes the gate (honest limitation)', () => {
+    // A hard-edged dark shape is indistinguishable from a tool — that IS a tool
+    // as far as any threshold method can tell. Sanity-check the gate opens.
+    const img = new Uint8Array(W * H).fill(235)
+    for (let y = 60; y < 120; y++) for (let x = 60; x < 140; x++) img[y * W + x] = 140
+    const mask = adaptiveToolMask(img, W, H, OPTS)
+    expect(mask[90 * W + 60]).toBe(1)
+  })
+})
 
 describe('otsuThreshold', () => {
   it('separates a clean bimodal distribution', () => {

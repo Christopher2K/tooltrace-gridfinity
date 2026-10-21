@@ -17,7 +17,7 @@ export interface DetectionResult {
 
 /** User-tunable detection parameters (confidence/adjust UI). */
 export interface DetectionOptions {
-  /** Offset added to the Otsu tool threshold (-40…+40). Higher = catches lighter tools. */
+  /** Sensitivity offset (-40…+40): higher catches lighter tools but risks soft shadows. */
   thresholdOffset?: number
   /** Contour simplification scale (0.3…2). Lower = more detail/vertices. Default 1. */
   detailScale?: number
@@ -33,8 +33,6 @@ export interface PreparedScan {
   paperSizeMm: { width: number; height: number }
   /** How the calibration quad was found. */
   quadSource: QuadSource
-  /** Otsu threshold computed on the rectified image (before user offset). */
-  baseThreshold: number
   /** Object URL of the rectified top-down paper image (JPEG). */
   rectifiedImageUrl: string
   debug: Record<string, string>
@@ -48,6 +46,8 @@ export interface PrepareOptions {
    * Skips automatic paper/marker detection.
    */
   manualQuad?: Point[]
+  /** Explicit reference-sheet size for marker calibration (overrides the remembered choice). */
+  paperSize?: PaperSize
 }
 
 function maskToDataUrl(mask: Uint8Array, labels: Int32Array | null, width: number, height: number): string {
@@ -91,6 +91,100 @@ const DETECT_WIDTH = 500
 /** Minimum tool area as a fraction of paper area. */
 const MIN_AREA_FRACTION = 0.003
 
+/** Summed-area table for O(1) local means (integral image, (w+1)×(h+1)). */
+function integralImage(data: Uint8Array, width: number, height: number): Float64Array {
+  const sat = new Float64Array((width + 1) * (height + 1))
+  const stride = width + 1
+  for (let y = 0; y < height; y++) {
+    let rowSum = 0
+    for (let x = 0; x < width; x++) {
+      rowSum += data[y * width + x]
+      sat[(y + 1) * stride + x + 1] = sat[y * stride + x + 1] + rowSum
+    }
+  }
+  return sat
+}
+
+export interface AdaptiveMaskOptions {
+  /** Local window radius in px (~half the smallest tool feature). */
+  radius: number
+  /** How much darker than the local surround a pixel must be to count as tool. */
+  contrast: number
+  /** Minimum Sobel edge strength — separates hard tool edges from soft shadows. */
+  gradMin: number
+}
+
+/**
+ * Shadow-robust tool mask. A pixel is tool when ALL of these hold:
+ *  1. clearly darker than its LOCAL neighborhood (not merely a global threshold) —
+ *     rejects regions that are uniformly dim like the heart of a cast shadow;
+ *  2. darker than a global guard just below the paper's white level;
+ *  3. EITHER on a strong intensity edge (Sobel) OR near-black.
+ *     Tool edges are hard (paper→plastic over a few px); cast-shadow boundaries
+ *     are soft (tens of px), so the gradient gate rejects them even when they're
+ *     dark enough to pass the local-contrast test.
+ *
+ * Large tools empty out in the middle (their interior's local mean IS the tool
+ * color and has no gradient) — the caller's fillHoles restores interiors.
+ */
+export function adaptiveToolMask(
+  data: Uint8Array,
+  width: number,
+  height: number,
+  { radius, contrast, gradMin }: AdaptiveMaskOptions,
+): Uint8Array {
+  const sat = integralImage(data, width, height)
+  const stride = width + 1
+
+  // Paper level: mean of pixels above the Otsu split (the bright cluster).
+  const t = otsuThreshold(data)
+  let brightSum = 0
+  let brightCount = 0
+  for (let i = 0; i < data.length; i++) {
+    if (data[i] >= t) {
+      brightSum += data[i]
+      brightCount++
+    }
+  }
+  const paperLevel = brightCount > 0 ? brightSum / brightCount : 240
+  const globalGuard = paperLevel - 6
+
+  const mask = new Uint8Array(data.length)
+  for (let y = 0; y < height; y++) {
+    const y0 = Math.max(0, y - radius)
+    const y1 = Math.min(height - 1, y + radius)
+    for (let x = 0; x < width; x++) {
+      const v = data[y * width + x]
+      if (v >= globalGuard) continue
+      const x0 = Math.max(0, x - radius)
+      const x1 = Math.min(width - 1, x + radius)
+      const sum =
+        sat[(y1 + 1) * stride + x1 + 1] -
+        sat[y0 * stride + x1 + 1] -
+        sat[(y1 + 1) * stride + x0] +
+        sat[y0 * stride + x0]
+      const mean = sum / ((x1 - x0 + 1) * (y1 - y0 + 1))
+      if (v >= mean - contrast) continue
+      if (v < 60) {
+        mask[y * width + x] = 1 // near-black: always tool (markers are pre-erased)
+        continue
+      }
+      // Sobel gradient (3×3). Tool edges are hard; shadow boundaries are soft.
+      if (x > 0 && x < width - 1 && y > 0 && y < height - 1) {
+        const i = y * width + x
+        const gx =
+          data[i - width + 1] + 2 * data[i + 1] + data[i + width + 1] -
+          (data[i - width - 1] + 2 * data[i - 1] + data[i + width - 1])
+        const gy =
+          data[i + width - 1] + 2 * data[i + width] + data[i + width + 1] -
+          (data[i - width - 1] + 2 * data[i - width] + data[i - width + 1])
+        if (Math.abs(gx) + Math.abs(gy) >= gradMin) mask[i] = 1
+      }
+    }
+  }
+  return mask
+}
+
 /** localStorage key recording which template size the user last downloaded. */
 const TEMPLATE_PAPER_KEY = 'tooltrace:template-paper'
 
@@ -111,6 +205,17 @@ function templatePaperSize(): { widthMm: number; heightMm: number } {
     /* ignore */
   }
   return PAPER_SIZES.a4
+}
+
+/** Which reference-sheet size the user last downloaded ('a4' default). */
+export function getTemplatePaperSize(): PaperSize {
+  try {
+    const v = localStorage.getItem(TEMPLATE_PAPER_KEY)
+    if (v === 'letter' || v === 'a4') return v
+  } catch {
+    /* ignore */
+  }
+  return 'a4'
 }
 
 /**
@@ -361,6 +466,30 @@ export function applyH(h: number[], x: number, y: number): Point {
   return { x: (h[0] * x + h[1] * y + h[2]) / d, y: (h[3] * x + h[4] * y + h[5]) / d }
 }
 
+/** Morphological dilation (4-neighborhood), `iterations` px. Closes small gaps in edge rings. */
+function dilate(mask: Uint8Array, width: number, height: number, iterations = 2) {
+  let src = mask
+  for (let it = 0; it < iterations; it++) {
+    const dst = new Uint8Array(src)
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const i = y * width + x
+        if (src[i]) continue
+        if (
+          (x > 0 && src[i - 1]) ||
+          (x < width - 1 && src[i + 1]) ||
+          (y > 0 && src[i - width]) ||
+          (y < height - 1 && src[i + width])
+        ) {
+          dst[i] = 1
+        }
+      }
+    }
+    src = dst
+  }
+  if (src !== mask) mask.set(src)
+}
+
 /** Fills holes in a binary mask (pixels not reachable from the border become foreground). */
 function fillHoles(mask: Uint8Array, width: number, height: number) {
   const seen = new Uint8Array(mask.length)
@@ -601,7 +730,7 @@ export async function prepareScan(file: File, options: PrepareOptions = {}): Pro
   let paperWmm: number
   let paperHmm: number
   if (quadSource === 'markers') {
-    const printed = templatePaperSize()
+    const printed = options.paperSize ? PAPER_SIZES[options.paperSize] : templatePaperSize()
     paperWmm = landscape ? Math.max(printed.widthMm, printed.heightMm) : Math.min(printed.widthMm, printed.heightMm)
     paperHmm = landscape ? Math.min(printed.widthMm, printed.heightMm) : Math.max(printed.widthMm, printed.heightMm)
   } else {
@@ -685,7 +814,6 @@ export async function prepareScan(file: File, options: PrepareOptions = {}): Pro
     mmPerPx,
     paperSizeMm: { width: paperWmm, height: paperHmm },
     quadSource,
-    baseThreshold: otsuThreshold(rect),
     rectifiedImageUrl: URL.createObjectURL(blob),
     debug: {
       ...(paperMask ? { paperMask: maskToDataUrl(paperMask, null, lo.width, lo.height) } : {}),
@@ -706,11 +834,19 @@ export function detectInScan(
   const { thresholdOffset = 0, detailScale = 1 } = options
   const { rect, width: dstW, height: dstH, mmPerPx } = scan
 
-  // --- Tool detection: dark components on the white rectified paper ---
-  const toolT = Math.min(255, Math.max(0, Math.round(scan.baseThreshold + thresholdOffset)))
-  const toolMask = new Uint8Array(rect.length)
-  for (let i = 0; i < rect.length; i++) toolMask[i] = rect[i] < toolT ? 1 : 0
+  // --- Tool detection: shadow-robust local-contrast mask ---
+  // Sensitivity slider maps to the local contrast delta: default 16 gray
+  // levels, higher sensitivity lowers it (catches lighter tools, risks soft
+  // shadows), lower sensitivity raises it.
+  const contrast = Math.min(64, Math.max(4, 16 - thresholdOffset))
+  const radius = Math.round(dstW / 10)
+  // Sobel gate: tool edges score ≥ ~150 even with slight defocus; soft cast
+  // shadows score ~15. 28 separates them with room on both sides.
+  const toolMask = adaptiveToolMask(rect, dstW, dstH, { radius, contrast, gradMin: 28 })
 
+  // The mask is an edge ring: dilate to close antialiasing gaps, then fill the
+  // enclosed tool interiors.
+  dilate(toolMask, dstW, dstH, 2)
   fillHoles(toolMask, dstW, dstH)
   const { labels, sizes } = labelComponents(toolMask, dstW, dstH)
 
@@ -721,6 +857,19 @@ export function detectInScan(
     if (size < minArea) continue
     const boundary = traceContour(labels, dstW, dstH, label)
     if (boundary.length < 8) continue
+    // Skip anything touching the frame edge: it touches the paper edge, so
+    // it's desk spill or a shadow at the sheet border — never a usable tool.
+    let bx0 = Infinity
+    let by0 = Infinity
+    let bx1 = -Infinity
+    let by1 = -Infinity
+    for (const p of boundary) {
+      if (p.x < bx0) bx0 = p.x
+      if (p.x > bx1) bx1 = p.x
+      if (p.y < by0) by0 = p.y
+      if (p.y > by1) by1 = p.y
+    }
+    if (bx0 <= 1 || by0 <= 1 || bx1 >= dstW - 2 || by1 >= dstH - 2) continue
     const epsilon = Math.max(1.5, Math.sqrt(size) * 0.01) * detailScale
     const simplified = simplify(boundary, epsilon)
 
