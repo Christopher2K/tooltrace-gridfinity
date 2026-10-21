@@ -38,6 +38,8 @@ export interface PanZoomContextValue {
   view: View
   /** Convert a client/pointer event position to world (mm) coordinates. */
   toMm: (e: { clientX: number; clientY: number }) => Point
+  /** Convert a screen-pixel length to world mm at the current zoom. */
+  pxToMm: (px: number) => number
   /** Zoom by `factor` around a point in mm (default: view center). Clamped & dampened. */
   zoomBy: (factor: number, centerMm?: Point) => void
   /** Reset the view to `computeFit()`. */
@@ -302,7 +304,14 @@ export function PanZoomCanvas(props: PanZoomCanvasProps) {
     }
   }
 
-  const ctx: PanZoomContextValue = { view: v, toMm, zoomBy, zoomToFit }
+  function pxToMm(px: number): number {
+    const rect = svgRef.current?.getBoundingClientRect()
+    const base = view ?? computeFitRef.current()
+    // Before the SVG mounts, assume ~1000 px of canvas width.
+    return rect && rect.width > 0 ? (px / rect.width) * base.w : (px / 1000) * base.w
+  }
+
+  const ctx: PanZoomContextValue = { view: v, toMm, pxToMm, zoomBy, zoomToFit }
 
   // --- background pan / click / touch long-press ---
   function onBackgroundPointerDown(e: React.PointerEvent) {
