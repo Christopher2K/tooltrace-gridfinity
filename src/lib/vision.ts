@@ -37,6 +37,8 @@ export interface PreparedScan {
   baseThreshold: number
   /** Object URL of the rectified top-down paper image (JPEG). */
   rectifiedImageUrl: string
+  /** JPEG data URL of the same image — persistable (editor photo layer, localStorage). */
+  rectifiedDataUrl: string
   debug: Record<string, string>
 }
 
@@ -700,6 +702,7 @@ export async function prepareScan(file: File, options: PrepareOptions = {}): Pro
     quadSource,
     baseThreshold: otsuThreshold(rect),
     rectifiedImageUrl: URL.createObjectURL(blob),
+    rectifiedDataUrl: rectifiedImageUrl,
     debug: {
       ...(paperMask ? { paperMask: maskToDataUrl(paperMask, null, lo.width, lo.height) } : {}),
       rectified: rectifiedImageUrl,

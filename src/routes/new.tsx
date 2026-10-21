@@ -46,6 +46,7 @@ function NewTrace() {
   /** The (possibly HEIC-converted) file behind the current scan — for paper-size re-runs. */
   const [scanFile, setScanFile] = useState<File | null>(null)
   const setTools = useEditorStore((s) => s.setTools)
+  const setScanImage = useEditorStore((s) => s.setScanImage)
   const navigate = useNavigate()
   const cameraRef = useRef<HTMLInputElement>(null)
   const detectTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -131,8 +132,9 @@ function NewTrace() {
   }, [scan, thresholdOffset, highDetail])
 
   function openEditor() {
-    if (detected.length === 0) return
+    if (detected.length === 0 || !scan) return
     setTools(detected)
+    setScanImage({ url: scan.rectifiedDataUrl, paperSizeMm: scan.paperSizeMm })
     navigate({ to: '/edit' })
   }
 

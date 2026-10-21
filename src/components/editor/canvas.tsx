@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Redo2, Undo2 } from 'lucide-react'
+import { EyeOff, Image as ImageIcon, ImageOff, Redo2, Shapes, Undo2 } from 'lucide-react'
 import { css } from '~/styled-system/css'
 import { IconButton } from '~/components/ui'
 import { bboxCenter, bboxOf, flattenOutline, insertVertex, nearestEdgeProjection, offsetPolygon, outlinePath, quadPoint, removeVertex, rotatePoint, setEdgeCurve, toolPoints } from '~/lib/geometry'
@@ -59,6 +59,10 @@ export function EditorCanvas() {
   const [dragging, setDragging] = useState(false)
   const [guides, setGuides] = useState<SnapGuide[]>([])
   const [editingId, setEditingId] = useState<string | null>(null)
+  // Reference-layer visibility: the rectified scan photo and the tool outlines.
+  const scanImage = useEditorStore((s) => s.scanImage)
+  const [showScan, setShowScan] = useState(true)
+  const [showOutlines, setShowOutlines] = useState(true)
   const { menu, openMenu, closeMenu } = useContextMenu()
   const isTouch = useIsTouch()
 
@@ -296,10 +300,28 @@ export function EditorCanvas() {
       <>
         {/* Tray */}
         <rect x={0} y={0} width={trayW} height={trayH} className={css({ fill: 'gray.a2', stroke: 'gray.7' })} strokeWidth={0.5} />
+
+        {/* Reference photo layer: the rectified scan, in sheet mm coordinates
+            (tool positions are sheet mm, so it aligns exactly). Under the grid,
+            never interactive. */}
+        {scanImage && showScan && (
+          <image
+            href={scanImage.url}
+            x={0}
+            y={0}
+            width={scanImage.paperSizeMm.width}
+            height={scanImage.paperSizeMm.height}
+            opacity={0.65}
+            preserveAspectRatio="none"
+            className={css({ pointerEvents: 'none' })}
+          />
+        )}
         {gridLines}
 
-        {/* Tools */}
-        {tools.map((tool) => {
+        {/* Tools (selected/editing tools always render, even with outlines hidden) */}
+        {tools
+          .filter((t) => showOutlines || t.id === selectedToolId || t.id === editingId)
+          .map((tool) => {
           const c = bboxCenter(tool.outline)
           const transform = `translate(${tool.position.x} ${tool.position.y}) rotate(${tool.rotationDeg} ${c.x} ${c.y})`
           const selected = tool.id === selectedToolId
@@ -409,6 +431,27 @@ export function EditorCanvas() {
             </IconButton>
             <IconButton size="xs" variant="plain" aria-label="Redo" disabled={!canRedo} onClick={redo}>
               <Redo2 size={14} />
+            </IconButton>
+            <div className={css({ w: 'px', h: '4', bg: 'border', mx: '1' })} />
+            {scanImage && (
+              <IconButton
+                size="xs"
+                variant="plain"
+                aria-label={showScan ? 'Hide scan photo' : 'Show scan photo'}
+                aria-pressed={showScan}
+                onClick={() => setShowScan((v) => !v)}
+              >
+                {showScan ? <ImageIcon size={14} /> : <ImageOff size={14} />}
+              </IconButton>
+            )}
+            <IconButton
+              size="xs"
+              variant="plain"
+              aria-label={showOutlines ? 'Hide outlines' : 'Show outlines'}
+              aria-pressed={showOutlines}
+              onClick={() => setShowOutlines((v) => !v)}
+            >
+              {showOutlines ? <Shapes size={14} /> : <EyeOff size={14} />}
             </IconButton>
             <div className={css({ w: 'px', h: '4', bg: 'border', mx: '1' })} />
           </>

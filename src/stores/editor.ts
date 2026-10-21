@@ -43,6 +43,14 @@ export interface TrayConfig {
 
 export type ShapeKind = 'rectangle' | 'circle' | 'notch'
 
+/** The rectified scan photo behind a trace, for the editor's photo reference layer. */
+export interface ScanImage {
+  /** JPEG data URL (persisted). */
+  url: string
+  /** Physical size of the rectified sheet — the image spans (0,0)→(w,h) in tray mm. */
+  paperSizeMm: { width: number; height: number }
+}
+
 interface Snapshot {
   tray: TrayConfig
   tools: ToolTrace[]
@@ -56,6 +64,8 @@ interface EditorState {
   selectedToolId: string | null
   /** Position snap increment in mm; 0 = off. */
   snapMm: number
+  /** Rectified scan photo shown under the outlines (null after project load). */
+  scanImage: ScanImage | null
   /** Undo/redo stacks (not persisted). */
   past: Snapshot[]
   future: Snapshot[]
@@ -64,6 +74,8 @@ interface EditorState {
   setTrayConfig: (config: Partial<TrayConfig>) => void
   addTool: (tool: ToolTrace) => void
   setTools: (tools: ToolTrace[]) => void
+  /** Sets/clears the photo reference layer (from detection review or null). */
+  setScanImage: (scan: ScanImage | null) => void
   /** Replaces tray + tools in one history entry (project file load). */
   loadProject: (tray: TrayConfig, tools: ToolTrace[]) => void
   addShape: (kind: ShapeKind, at?: Point) => void
@@ -123,6 +135,7 @@ export const useEditorStore = create<EditorState>()(
       tools: [],
       selectedToolId: null,
       snapMm: 5,
+      scanImage: null,
       past: [],
       future: [],
 
@@ -131,8 +144,10 @@ export const useEditorStore = create<EditorState>()(
       setTrayConfig: (config) => set((s) => ({ tray: { ...s.tray, ...config }, ...record(s) })),
       addTool: (tool) => set((s) => ({ tools: [...s.tools, tool], ...record(s) })),
       setTools: (tools) => set((s) => ({ tools, selectedToolId: null, ...record(s) })),
+      setScanImage: (scanImage) => set({ scanImage }),
       loadProject: (tray, tools) =>
-        set((s) => ({ tray, tools, selectedToolId: null, ...record(s) })),
+        // A loaded project has no matching scan photo — clear the reference layer.
+        set((s) => ({ tray, tools, selectedToolId: null, scanImage: null, ...record(s) })),
       addShape: (kind, at) =>
         set((s) => {
           const outline = shapeOutlines[kind]()
@@ -263,7 +278,7 @@ export const useEditorStore = create<EditorState>()(
       name: 'tooltrace-editor',
       // History must not be persisted — it would balloon localStorage and
       // restore stale undo stacks across sessions.
-      partialize: (s) => ({ tray: s.tray, tools: s.tools, snapMm: s.snapMm }),
+      partialize: (s) => ({ tray: s.tray, tools: s.tools, snapMm: s.snapMm, scanImage: s.scanImage }),
     },
   ),
 )
