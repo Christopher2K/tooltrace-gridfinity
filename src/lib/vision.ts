@@ -1,10 +1,14 @@
 import type { Point, ToolTrace } from '~/stores/editor'
+import { PAPER_SIZES, type PaperSize } from '~/lib/pdf'
+import { MARKER_INSET_MM } from '~/lib/template'
 import { uuid } from '~/lib/uuid'
 
 export interface DetectionResult {
   tools: ToolTrace[]
   paperSizeMm: { width: number; height: number }
   mmPerPx: number
+  /** How the calibration quad was found. */
+  quadSource: QuadSource
   /** Object URL of the rectified top-down paper image (JPEG). */
   rectifiedImageUrl: string
   /** Debug visualizations (mask overlays). */
@@ -27,11 +31,23 @@ export interface PreparedScan {
   height: number
   mmPerPx: number
   paperSizeMm: { width: number; height: number }
+  /** How the calibration quad was found. */
+  quadSource: QuadSource
   /** Otsu threshold computed on the rectified image (before user offset). */
   baseThreshold: number
   /** Object URL of the rectified top-down paper image (JPEG). */
   rectifiedImageUrl: string
   debug: Record<string, string>
+}
+
+export type QuadSource = 'markers' | 'paper' | 'manual'
+
+export interface PrepareOptions {
+  /**
+   * Manual paper corners in full-resolution image pixels, ordered TL, TR, BR, BL.
+   * Skips automatic paper/marker detection.
+   */
+  manualQuad?: Point[]
 }
 
 function maskToDataUrl(mask: Uint8Array, labels: Int32Array | null, width: number, height: number): string {
@@ -68,14 +84,140 @@ function grayToDataUrl(data: Uint8Array, width: number, height: number): string 
   return canvas.toDataURL('image/jpeg', 0.85)
 }
 
-const A4_SHORT_MM = 210
-const A4_LONG_MM = 297
 /** Width of the rectified working image in px. */
 const WARP_WIDTH = 1200
 /** Downscaled width used for paper detection. */
 const DETECT_WIDTH = 500
 /** Minimum tool area as a fraction of paper area. */
 const MIN_AREA_FRACTION = 0.003
+
+/** localStorage key recording which template size the user last downloaded. */
+const TEMPLATE_PAPER_KEY = 'tooltrace:template-paper'
+
+/** Remember which reference-sheet size the user printed (drives marker-quad calibration). */
+export function setTemplatePaperSize(paper: PaperSize) {
+  try {
+    localStorage.setItem(TEMPLATE_PAPER_KEY, paper)
+  } catch {
+    /* private mode etc. */
+  }
+}
+
+function templatePaperSize(): { widthMm: number; heightMm: number } {
+  try {
+    const v = localStorage.getItem(TEMPLATE_PAPER_KEY)
+    if (v === 'letter' || v === 'a4') return PAPER_SIZES[v]
+  } catch {
+    /* ignore */
+  }
+  return PAPER_SIZES.a4
+}
+
+/**
+ * Find the 4 printed fiducial markers: compact black squares just inside each
+ * paper corner. Returns their centroids (lo-res px, TL/TR/BR/BL) or null.
+ *
+ * Search is restricted to dark components fully inside the detected paper
+ * region, in a corner zone of 18% of the paper bbox, so tools in the middle
+ * of the sheet are never mistaken for markers.
+ */
+function findMarkerQuad(
+  gray: Uint8Array,
+  width: number,
+  height: number,
+  paperLabels: Int32Array,
+  paperLabel: number,
+  paperArea: number,
+): Point[] | null {
+  // Printed markers are near-black; a fixed threshold keeps us independent of
+  // the paper/desk Otsu split (which can shift with lighting).
+  const MARKER_T = 100
+  const mask = new Uint8Array(width * height)
+  let any = false
+  for (let i = 0; i < mask.length; i++) {
+    if (paperLabels[i] === paperLabel && gray[i] < MARKER_T) {
+      mask[i] = 1
+      any = true
+    }
+  }
+  if (!any) return null
+
+  const { labels, sizes } = labelComponents(mask, width, height)
+
+  // Paper bbox (for corner zones + plausible marker size).
+  let px0 = width
+  let py0 = height
+  let px1 = 0
+  let py1 = 0
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (paperLabels[y * width + x] !== paperLabel) continue
+      if (x < px0) px0 = x
+      if (x > px1) px1 = x
+      if (y < py0) py0 = y
+      if (y > py1) py1 = y
+    }
+  }
+  const pw = px1 - px0
+  const ph = py1 - py0
+  if (pw <= 0 || ph <= 0) return null
+
+  // Expected marker footprint: MARKER_SIZE_MM on a ~210–297 mm sheet, ±generous slack.
+  const minArea = paperArea * 0.0004
+  const maxArea = paperArea * 0.01
+  const zoneX = pw * 0.18
+  const zoneY = ph * 0.18
+
+  // Corner zones (lo-res px) in TL/TR/BR/BL order.
+  const corners = [
+    { cx: px0, cy: py0 },
+    { cx: px1, cy: py0 },
+    { cx: px1, cy: py1 },
+    { cx: px0, cy: py1 },
+  ]
+  const quad: Point[] = []
+
+  for (const { cx, cy } of corners) {
+    let best: { p: Point; dist: number } | null = null
+    for (const [label, size] of sizes) {
+      if (size < minArea || size > maxArea) continue
+      // Bbox + fill ratio + centroid of the component.
+      let bx0 = width
+      let by0 = height
+      let bx1 = 0
+      let by1 = 0
+      let sx = 0
+      let sy = 0
+      for (let i = 0; i < labels.length; i++) {
+        if (labels[i] !== label) continue
+        const x = i % width
+        const y = (i / width) | 0
+        sx += x
+        sy += y
+        if (x < bx0) bx0 = x
+        if (x > bx1) bx1 = x
+        if (y < by0) by0 = y
+        if (y > by1) by1 = y
+      }
+      const bw = bx1 - bx0 + 1
+      const bh = by1 - by0 + 1
+      const aspect = bw / bh
+      if (aspect < 0.6 || aspect > 1.6) continue
+      const fill = size / (bw * bh)
+      if (fill < 0.55) continue
+      const centroid = { x: sx / size, y: sy / size }
+      // Must sit in this corner's zone.
+      const inX = Math.abs(centroid.x - cx) < zoneX
+      const inY = Math.abs(centroid.y - cy) < zoneY
+      if (!inX || !inY) continue
+      const dist = Math.hypot(centroid.x - cx, centroid.y - cy)
+      if (!best || dist < best.dist) best = { p: centroid, dist }
+    }
+    if (!best) return null // all four markers required
+    quad.push(best.p)
+  }
+  return quad
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -349,88 +491,125 @@ function simplify(points: Point[], epsilon: number): Point[] {
  * Detection itself (`detectInScan`) is separate so users can re-run it with
  * adjusted threshold/detail settings without repeating the expensive warp.
  */
-export async function prepareScan(file: File): Promise<PreparedScan> {
+export async function prepareScan(file: File, options: PrepareOptions = {}): Promise<PreparedScan> {
   const img = await loadBitmap(file)
 
-  // --- 1. Paper detection at low resolution ---
+  // --- 1. Paper detection at low resolution (skipped for manual corner picks) ---
   const lo = drawToGray(img, DETECT_WIDTH)
-  const paperT = otsuThreshold(lo.data)
-  const paperMask = new Uint8Array(lo.data.length)
-  for (let i = 0; i < lo.data.length; i++) paperMask[i] = lo.data[i] > paperT ? 1 : 0
-
-  // Polarity: paper should be the bright region; check the four corners.
-  const cornerVals = [
-    paperMask[0],
-    paperMask[lo.width - 1],
-    paperMask[(lo.height - 1) * lo.width],
-    paperMask[lo.height * lo.width - 1],
-  ]
-  const cornerMean = cornerVals.reduce((a, b) => a + b, 0) / 4
-  if (cornerMean > 0.5) {
-    for (let i = 0; i < paperMask.length; i++) paperMask[i] ^= 1
-  }
-
-  fillHoles(paperMask, lo.width, lo.height)
-  const { labels: paperLabels, sizes: paperSizes } = labelComponents(paperMask, lo.width, lo.height)
-
+  let paperMask: Uint8Array | null = null
+  let paperLabels: Int32Array | null = null
   let paperLabel = 0
   let paperArea = 0
-  for (const [label, size] of paperSizes) {
-    if (size > paperArea) {
-      paperArea = size
-      paperLabel = label
+  if (!options.manualQuad) {
+    const paperT = otsuThreshold(lo.data)
+    paperMask = new Uint8Array(lo.data.length)
+    for (let i = 0; i < lo.data.length; i++) paperMask[i] = lo.data[i] > paperT ? 1 : 0
+
+    // Polarity: paper should be the bright region; check the four corners.
+    const cornerVals = [
+      paperMask[0],
+      paperMask[lo.width - 1],
+      paperMask[(lo.height - 1) * lo.width],
+      paperMask[lo.height * lo.width - 1],
+    ]
+    const cornerMean = cornerVals.reduce((a, b) => a + b, 0) / 4
+    if (cornerMean > 0.5) {
+      for (let i = 0; i < paperMask.length; i++) paperMask[i] ^= 1
     }
-  }
-  if (!paperLabel || paperArea < lo.width * lo.height * 0.2) {
-    throw new Error(
-      'Could not find the paper sheet. Make sure the whole sheet is visible on a darker background.',
-    )
+
+    fillHoles(paperMask, lo.width, lo.height)
+    const labeled = labelComponents(paperMask, lo.width, lo.height)
+    paperLabels = labeled.labels
+
+    for (const [label, size] of labeled.sizes) {
+      if (size > paperArea) {
+        paperArea = size
+        paperLabel = label
+      }
+    }
+    if (!paperLabel || paperArea < lo.width * lo.height * 0.2) {
+      throw new Error(
+        'Could not find the paper sheet. Make sure the whole sheet is visible on a darker background.',
+      )
+    }
   }
 
   // Paper quad from extreme points of the component (works well for rectangles).
-  let tl: Point = { x: 0, y: 0 }
-  let tr: Point = { x: 0, y: 0 }
-  let br: Point = { x: 0, y: 0 }
-  let bl: Point = { x: 0, y: 0 }
-  let minSum = Infinity
-  let maxSum = -Infinity
-  let minDiff = Infinity
-  let maxDiff = -Infinity
-  for (let y = 0; y < lo.height; y++) {
-    for (let x = 0; x < lo.width; x++) {
-      if (paperLabels[y * lo.width + x] !== paperLabel) continue
-      const sum = x + y
-      const diff = x - y
-      if (sum < minSum) {
-        minSum = sum
-        tl = { x, y }
-      }
-      if (sum > maxSum) {
-        maxSum = sum
-        br = { x, y }
-      }
-      if (diff > maxDiff) {
-        maxDiff = diff
-        tr = { x, y }
-      }
-      if (diff < minDiff) {
-        minDiff = diff
-        bl = { x, y }
+  function paperBlobQuad(labels: Int32Array): Point[] {
+    let tl: Point = { x: 0, y: 0 }
+    let tr: Point = { x: 0, y: 0 }
+    let br: Point = { x: 0, y: 0 }
+    let bl: Point = { x: 0, y: 0 }
+    let minSum = Infinity
+    let maxSum = -Infinity
+    let minDiff = Infinity
+    let maxDiff = -Infinity
+    for (let y = 0; y < lo.height; y++) {
+      for (let x = 0; x < lo.width; x++) {
+        if (labels[y * lo.width + x] !== paperLabel) continue
+        const sum = x + y
+        const diff = x - y
+        if (sum < minSum) {
+          minSum = sum
+          tl = { x, y }
+        }
+        if (sum > maxSum) {
+          maxSum = sum
+          br = { x, y }
+        }
+        if (diff > maxDiff) {
+          maxDiff = diff
+          tr = { x, y }
+        }
+        if (diff < minDiff) {
+          minDiff = diff
+          bl = { x, y }
+        }
       }
     }
+    return [tl, tr, br, bl]
   }
 
   // Scale quad back to full-resolution image coordinates.
   const fullW = img.width
   const scaleUp = fullW / lo.width
-  const quadFull = [tl, tr, br, bl].map((p) => ({ x: p.x * scaleUp, y: p.y * scaleUp }))
+
+  // Quad source priority: manual corner picks > printed fiducial markers > paper blob.
+  let quadFull: Point[]
+  let quadSource: QuadSource
+  if (options.manualQuad) {
+    quadFull = options.manualQuad
+    quadSource = 'manual'
+  } else {
+    const markerQuadLo = findMarkerQuad(lo.data, lo.width, lo.height, paperLabels!, paperLabel, paperArea)
+    if (markerQuadLo) {
+      quadFull = markerQuadLo.map((p) => ({ x: p.x * scaleUp, y: p.y * scaleUp }))
+      quadSource = 'markers'
+    } else {
+      quadFull = paperBlobQuad(paperLabels!).map((p) => ({ x: p.x * scaleUp, y: p.y * scaleUp }))
+      quadSource = 'paper'
+    }
+  }
 
   // --- 2. Rectify to top-down at WARP_WIDTH ---
   const quadW = Math.hypot(quadFull[1].x - quadFull[0].x, quadFull[1].y - quadFull[0].y)
   const quadH = Math.hypot(quadFull[3].x - quadFull[0].x, quadFull[3].y - quadFull[0].y)
   const landscape = quadW >= quadH
-  const paperWmm = landscape ? A4_LONG_MM : A4_SHORT_MM
-  const paperHmm = landscape ? A4_SHORT_MM : A4_LONG_MM
+
+  // Paper size: markers ⇒ the template the user printed (remembered at download);
+  // otherwise guess A4 vs Letter from the quad aspect ratio.
+  let paperWmm: number
+  let paperHmm: number
+  if (quadSource === 'markers') {
+    const printed = templatePaperSize()
+    paperWmm = landscape ? Math.max(printed.widthMm, printed.heightMm) : Math.min(printed.widthMm, printed.heightMm)
+    paperHmm = landscape ? Math.min(printed.widthMm, printed.heightMm) : Math.max(printed.widthMm, printed.heightMm)
+  } else {
+    const aspect = Math.max(quadW, quadH) / Math.min(quadW, quadH)
+    const size = Math.abs(aspect - 1.294) < Math.abs(aspect - 1.414) ? PAPER_SIZES.letter : PAPER_SIZES.a4
+    paperWmm = landscape ? Math.max(size.widthMm, size.heightMm) : Math.min(size.widthMm, size.heightMm)
+    paperHmm = landscape ? Math.min(size.widthMm, size.heightMm) : Math.max(size.widthMm, size.heightMm)
+  }
 
   const dstW = WARP_WIDTH
   const dstH = Math.round((WARP_WIDTH * paperHmm) / paperWmm)
@@ -443,12 +622,24 @@ export async function prepareScan(file: File): Promise<PreparedScan> {
   const quadHi = quadFull.map((p) => ({ x: p.x * hiScale, y: p.y * hiScale }))
 
   // Homography from rectified dst coords → source hi-res coords (for sampling).
-  const dstQuad: Point[] = [
-    { x: 0, y: 0 },
-    { x: dstW, y: 0 },
-    { x: dstW, y: dstH },
-    { x: 0, y: dstH },
-  ]
+  // Marker quads anchor at the marker centers, which sit MARKER_INSET_MM inside
+  // the sheet — map to those inset positions rather than the image corners.
+  const pxPerMm = dstW / paperWmm
+  const insetPx = MARKER_INSET_MM * pxPerMm
+  const dstQuad: Point[] =
+    quadSource === 'markers'
+      ? [
+          { x: insetPx, y: insetPx },
+          { x: dstW - insetPx, y: insetPx },
+          { x: dstW - insetPx, y: dstH - insetPx },
+          { x: insetPx, y: dstH - insetPx },
+        ]
+      : [
+          { x: 0, y: 0 },
+          { x: dstW, y: 0 },
+          { x: dstW, y: dstH },
+          { x: 0, y: dstH },
+        ]
   const Hinv = homography(dstQuad, quadHi)
 
   const rect = new Uint8Array(dstW * dstH)
@@ -465,6 +656,24 @@ export async function prepareScan(file: File): Promise<PreparedScan> {
     }
   }
 
+  // Erase the fiducial markers from the rectified scan so they can never be
+  // detected as tools (the template keeps a quiet zone there anyway).
+  if (quadSource === 'markers') {
+    const erasePx = Math.round((MARKER_INSET_MM + 10) * pxPerMm)
+    for (const [ox, oy] of [
+      [0, 0],
+      [dstW - erasePx, 0],
+      [dstW - erasePx, dstH - erasePx],
+      [0, dstH - erasePx],
+    ]) {
+      for (let y = oy; y < oy + erasePx; y++) {
+        for (let x = ox; x < ox + erasePx; x++) {
+          if (x >= 0 && y >= 0 && x < dstW && y < dstH) rect[y * dstW + x] = 255
+        }
+      }
+    }
+  }
+
   // Rectified preview image
   const rectifiedImageUrl = grayToDataUrl(rect, dstW, dstH)
   const blob = await (await fetch(rectifiedImageUrl)).blob()
@@ -475,12 +684,13 @@ export async function prepareScan(file: File): Promise<PreparedScan> {
     height: dstH,
     mmPerPx,
     paperSizeMm: { width: paperWmm, height: paperHmm },
+    quadSource,
     baseThreshold: otsuThreshold(rect),
     rectifiedImageUrl: URL.createObjectURL(blob),
     debug: {
-      paperMask: maskToDataUrl(paperMask, null, lo.width, lo.height),
+      ...(paperMask ? { paperMask: maskToDataUrl(paperMask, null, lo.width, lo.height) } : {}),
       rectified: rectifiedImageUrl,
-      quad: JSON.stringify([tl, tr, br, bl]),
+      quad: JSON.stringify(quadFull),
     },
   }
 }
@@ -533,13 +743,17 @@ export function detectInScan(
 }
 
 /** One-shot convenience wrapper: prepare + detect with default options. */
-export async function detectTools(file: File, options: DetectionOptions = {}): Promise<DetectionResult> {
-  const scan = await prepareScan(file)
+export async function detectTools(
+  file: File,
+  options: DetectionOptions & PrepareOptions = {},
+): Promise<DetectionResult> {
+  const scan = await prepareScan(file, options)
   const { tools, toolMaskUrl } = detectInScan(scan, options)
   return {
     tools,
     paperSizeMm: scan.paperSizeMm,
     mmPerPx: scan.mmPerPx,
+    quadSource: scan.quadSource,
     rectifiedImageUrl: scan.rectifiedImageUrl,
     debug: { ...scan.debug, toolMask: toolMaskUrl },
   }
