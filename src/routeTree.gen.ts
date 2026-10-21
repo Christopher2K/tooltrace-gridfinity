@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as EditRouteImport } from './routes/edit'
 import { Route as NewRouteImport } from './routes/new'
+import { Route as ApiConvertHeicRouteImport } from './routes/api/convert-heic'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -28,35 +29,44 @@ const NewRoute = NewRouteImport.update({
   path: '/new',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiConvertHeicRoute = ApiConvertHeicRouteImport.update({
+  id: '/api/convert-heic',
+  path: '/api/convert-heic',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/edit': typeof EditRoute
   '/new': typeof NewRoute
+  '/api/convert-heic': typeof ApiConvertHeicRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/edit': typeof EditRoute
   '/new': typeof NewRoute
+  '/api/convert-heic': typeof ApiConvertHeicRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/edit': typeof EditRoute
   '/new': typeof NewRoute
+  '/api/convert-heic': typeof ApiConvertHeicRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/edit' | '/new'
+  fullPaths: '/' | '/edit' | '/new' | '/api/convert-heic'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/edit' | '/new'
-  id: '__root__' | '/' | '/edit' | '/new'
+  to: '/' | '/edit' | '/new' | '/api/convert-heic'
+  id: '__root__' | '/' | '/edit' | '/new' | '/api/convert-heic'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   EditRoute: typeof EditRoute
   NewRoute: typeof NewRoute
+  ApiConvertHeicRoute: typeof ApiConvertHeicRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -82,6 +92,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof NewRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/convert-heic': {
+      id: '/api/convert-heic'
+      path: '/api/convert-heic'
+      fullPath: '/api/convert-heic'
+      preLoaderRoute: typeof ApiConvertHeicRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -89,6 +106,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   EditRoute: EditRoute,
   NewRoute: NewRoute,
+  ApiConvertHeicRoute: ApiConvertHeicRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

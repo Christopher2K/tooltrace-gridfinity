@@ -407,7 +407,8 @@ function NewTrace() {
       )}
 
       <Text textStyle="sm" color="fg.subtle">
-        Detection runs locally in your browser — no photo is uploaded anywhere.
+        Detection runs on this machine — JPEG/PNG never leave your browser; HEIC photos are
+        converted by this app's own server. No third-party services.
       </Text>
     </div>
   )

@@ -1,8 +1,9 @@
 /**
- * HEIC/HEIF support: iPhones shoot HEIC by default ("High Efficiency" mode), and no browser
- * can decode it natively via createImageBitmap. `heic2any` wraps libheif (WASM) to convert
- * HEIC → JPEG client-side. It is imported dynamically so the WASM only loads when a HEIC
- * file is actually uploaded, and never during SSR.
+ * HEIC/HEIF support: iPhones shoot HEIC by default ("High Efficiency" mode), and no
+ * browser except Safari can decode it. Conversion happens on the app server
+ * (POST /api/convert-heic, modern libheif 1.19) — when self-hosted, photos never
+ * leave the owner's machine. If the browser can decode the file natively we skip
+ * the roundtrip entirely.
  */
 
 /** True when the file looks like HEIC/HEIF — by MIME type or, as a fallback, by extension
@@ -15,7 +16,7 @@ export function isHeicFile(file: File): boolean {
   return /\.hei[cf]$/i.test(file.name)
 }
 
-/** Extract a readable message from whatever heic2any throws (often {code, message} objects). */
+/** Extract a readable message from whatever a decoder throws (often {code, message} objects). */
 function describeError(e: unknown): string {
   if (e instanceof Error) return e.message
   if (e && typeof e === 'object' && 'message' in e) return String((e as { message: unknown }).message)
@@ -23,88 +24,45 @@ function describeError(e: unknown): string {
 }
 
 /**
- * Decode a HEIC via the browser's <img> decoder (Safari on iOS/macOS uses the
- * system decoder here even when createImageBitmap rejects the format) and
- * re-encode as JPEG through a canvas. Also applies EXIF orientation, which
- * heic2any notoriously ignores (sideways photos).
- */
-async function decodeViaImageElement(file: File): Promise<Blob> {
-  const url = URL.createObjectURL(file)
-  try {
-    const img = new Image()
-    await new Promise<void>((resolve, reject) => {
-      img.onload = () => resolve()
-      img.onerror = () => reject(new Error('image element decode failed'))
-      img.src = url
-    })
-    if (!img.naturalWidth || !img.naturalHeight) throw new Error('image decoded to 0×0')
-    // Cap canvas size to avoid memory blowups on 48 MP sensors.
-    const maxEdge = 6000
-    const scale = Math.min(1, maxEdge / Math.max(img.naturalWidth, img.naturalHeight))
-    const canvas = document.createElement('canvas')
-    canvas.width = Math.round(img.naturalWidth * scale)
-    canvas.height = Math.round(img.naturalHeight * scale)
-    canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height)
-    const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/jpeg', 0.92))
-    if (!blob) throw new Error('canvas JPEG export failed')
-    return blob
-  } finally {
-    URL.revokeObjectURL(url)
-  }
-}
-
-/**
- * Returns the input unchanged when the browser can decode it directly; converts
- * HEIC/HEIF to a JPEG File otherwise.
- *
- * Strategy, in order:
- *  1. createImageBitmap probe — if the browser decodes HEIC natively, keep the
- *     original file (fast path, no quality loss).
- *  2. <img> + canvas JPEG re-encode — Safari's system decoder handles iPhone
- *     grid/tiled HEICs (48 MP) that WASM libheif can't, and applies EXIF rotation.
- *  3. heic2any (WASM libheif) — last resort for Chrome/Firefox; dynamic import
- *     keeps libheif out of the initial bundle and out of SSR.
+ * Returns the input unchanged when the browser can decode it directly; otherwise
+ * sends it to the app server for HEIC → JPEG conversion and returns the JPEG File.
  */
 export async function convertIfHeic(file: File): Promise<File> {
   if (!isHeicFile(file)) return file
 
-  // 1. Native decode probe.
+  // Native decode probe (Safari on Apple platforms reads HEIC system-wide).
   try {
     const probe = await createImageBitmap(file)
     probe.close()
-    return file // browser can read it as-is — no conversion needed
+    return file
   } catch {
-    // expected on Chrome/Firefox — fall through
-  }
-
-  // 2. <img> decode → JPEG (Safari system decoder; handles grid HEICs).
-  let imgErr: unknown = null
-  try {
-    const blob = await decodeViaImageElement(file)
-    const name = file.name.replace(/\.[^.]*$/, '') || 'photo'
-    return new File([blob], `${name}.jpg`, { type: 'image/jpeg' })
-  } catch (e) {
-    imgErr = e
-  }
-
-  // 3. WASM conversion via heic2any.
-  const { default: heic2any } = await import('heic2any')
-  let converted: Blob | Blob[]
-  try {
-    converted = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.92 })
-  } catch (e) {
-    throw new Error(
-      `Could not convert this HEIC photo (native: ${describeError(imgErr)}; libheif: ${describeError(e)}). ` +
-        'On iPhone, try Settings → Camera → Formats → Most Compatible, or retake the photo as JPEG.',
-    )
-  }
-
-  // heic2any may return an array for multi-image HEIC files — use the first image.
-  const blob = Array.isArray(converted) ? converted[0] : converted
-  if (!blob) {
-    throw new Error('Could not convert this HEIC photo — the file appears to be empty.')
+    // expected on Chrome/Firefox — convert server-side
   }
 
   const name = file.name.replace(/\.[^.]*$/, '') || 'photo'
+  let res: Response
+  try {
+    res = await fetch('/api/convert-heic', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: file,
+    })
+  } catch (e) {
+    throw new Error(`Could not reach the conversion server (${describeError(e)}).`)
+  }
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`
+    try {
+      const body = (await res.json()) as { error?: string }
+      if (body.error) detail = body.error
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new Error(
+      `Could not convert this HEIC photo (${detail}). ` +
+        'On iPhone, try Settings → Camera → Formats → Most Compatible, or retake the photo as JPEG.',
+    )
+  }
+  const blob = await res.blob()
   return new File([blob], `${name}.jpg`, { type: 'image/jpeg' })
 }
