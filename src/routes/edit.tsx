@@ -59,7 +59,10 @@ function Editor() {
       className={css({
         display: 'grid',
         gap: '4',
-        alignItems: 'start',
+        // Desktop: items stretch to the single grid row; each region then
+        // scrolls independently (minH: 0 + overflowY) instead of growing
+        // the page.
+        alignItems: { base: 'start', lg: 'stretch' },
         // Desktop: tray | canvas | side panels, filling the viewport height.
         // Below lg: single column with the canvas first, panels stacked underneath.
         gridTemplateColumns: { base: '1fr', lg: '240px minmax(0, 1fr) 300px' },
@@ -68,12 +71,33 @@ function Editor() {
         minH: { lg: '0' },
       })}
     >
-      <TrayPanel />
+      <div className={css({ minH: { lg: '0' }, overflowY: { lg: 'auto' } })}>
+        <TrayPanel />
+      </div>
       {/* Canvas first on mobile via `order`; middle column at lg (DOM order). */}
-      <div className={css({ order: { base: -1, lg: 0 }, alignSelf: { lg: 'stretch' }, minW: '0', h: { lg: 'full' } })}>
+      <div
+        className={css({
+          order: { base: -1, lg: 0 },
+          alignSelf: { lg: 'stretch' },
+          minW: '0',
+          minH: { lg: '0' },
+          h: { lg: 'full' },
+        })}
+      >
         <EditorCanvas />
       </div>
-      <div className={css({ display: 'flex', flexDir: 'column', gap: '4' })}>
+      <div
+        className={css({
+          display: 'flex',
+          flexDir: 'column',
+          gap: '4',
+          minH: { lg: '0' },
+          overflowY: { lg: 'auto' },
+          // Don't let the cards shrink-and-clip inside the constrained
+          // column; keep natural height so the column itself scrolls.
+          '& > *': { flexShrink: { lg: 0 } },
+        })}
+      >
         <ExportPanel />
         <ToolsPanel />
         <ValidationPanel />
