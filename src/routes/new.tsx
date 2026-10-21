@@ -1,7 +1,8 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useState } from 'react'
+import { Camera } from 'lucide-react'
+import { useRef, useState } from 'react'
 import { css } from '~/styled-system/css'
-import { Card, FileUpload, Heading, Spinner, Text } from '~/components/ui'
+import { Button, Card, FileUpload, Heading, Spinner, Text } from '~/components/ui'
 import { detectTools } from '~/lib/vision'
 import { useEditorStore } from '~/stores/editor'
 
@@ -14,6 +15,7 @@ function NewTrace() {
   const [error, setError] = useState<string | null>(null)
   const setTools = useEditorStore((s) => s.setTools)
   const navigate = useNavigate()
+  const cameraRef = useRef<HTMLInputElement>(null)
 
   async function processFile(file: File) {
     setProcessing(true)
@@ -33,8 +35,8 @@ function NewTrace() {
   }
 
   return (
-    <div className={css({ display: 'flex', flexDir: 'column', gap: '6', maxW: '3xl', mx: 'auto', py: '8' })}>
-      <Heading textStyle="3xl">New trace</Heading>
+    <div className={css({ display: 'flex', flexDir: 'column', gap: '6', maxW: '3xl', mx: 'auto', w: 'full', py: { base: '4', sm: '8' } })}>
+      <Heading textStyle={{ base: '2xl', sm: '3xl' }}>New trace</Heading>
       <Text color="fg.muted">
         Place your tools on a white A4/Letter sheet (darker desk underneath), take a top-down
         photo, and upload it. The app will rectify the image, calibrate scale, and detect tool
@@ -46,7 +48,7 @@ function NewTrace() {
           <Card.Title>Upload photo</Card.Title>
           <Card.Description>JPG or PNG, taken straight from above</Card.Description>
         </Card.Header>
-        <Card.Body>
+        <Card.Body className={css({ display: 'flex', flexDir: 'column', gap: '3' })}>
           <FileUpload.Root
             maxFiles={1}
             accept={['image/jpeg', 'image/png']}
@@ -55,8 +57,8 @@ function NewTrace() {
               if (file) processFile(file)
             }}
           >
-            <FileUpload.Dropzone className={css({ cursor: 'pointer' })}>
-              <div className={css({ display: 'flex', alignItems: 'center', gap: '2', color: 'fg.muted' })}>
+            <FileUpload.Dropzone className={css({ cursor: 'pointer', minH: { base: '32', sm: 'auto' } })}>
+              <div className={css({ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '2', color: 'fg.muted' })}>
                 {processing && <Spinner size="sm" />}
                 <Text color="fg.muted">
                   {processing ? 'Detecting tools…' : 'Drag & drop your photo here, or click to browse'}
@@ -79,6 +81,24 @@ function NewTrace() {
             </FileUpload.ItemGroup>
             <FileUpload.HiddenInput />
           </FileUpload.Root>
+
+          {/* Mobile-first path: straight to the camera. On desktop this opens a file picker. */}
+          <Button variant="outline" disabled={processing} onClick={() => cameraRef.current?.click()}>
+            <Camera size={16} /> Take photo
+          </Button>
+          <input
+            ref={cameraRef}
+            type="file"
+            name="camera-capture"
+            accept="image/*"
+            capture="environment"
+            className={css({ display: 'none' })}
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              e.target.value = ''
+              if (file) processFile(file)
+            }}
+          />
         </Card.Body>
       </Card.Root>
 

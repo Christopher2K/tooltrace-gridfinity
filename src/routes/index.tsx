@@ -10,9 +10,9 @@ const stepCard = css({ flex: '1', minW: '220px' })
 
 function Home() {
   return (
-    <div className={css({ display: 'flex', flexDir: 'column', gap: '8', maxW: '5xl', mx: 'auto', py: '8' })}>
+    <div className={css({ display: 'flex', flexDir: 'column', gap: { base: '6', sm: '8' }, maxW: '5xl', mx: 'auto', py: { base: '4', sm: '8' } })}>
       <section className={css({ textAlign: 'center', display: 'flex', flexDir: 'column', gap: '4', alignItems: 'center' })}>
-        <Heading textStyle="4xl">Photo in. Custom insert out.</Heading>
+        <Heading textStyle={{ base: '3xl', sm: '4xl' }}>Photo in. Custom insert out.</Heading>
         <Text color="fg.muted" maxW="2xl">
           Snap a photo of your tools on a reference sheet, auto-detect their outlines, arrange them
           in a tray, and export a Gridfinity-ready STL or a 1:1 print-test PDF.

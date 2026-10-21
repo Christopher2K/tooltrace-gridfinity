@@ -1,4 +1,5 @@
 import type { Point, ToolTrace } from '~/stores/editor'
+import { uuid } from '~/lib/uuid'
 
 export interface DetectionResult {
   tools: ToolTrace[]
@@ -461,7 +462,7 @@ export async function detectTools(file: File): Promise<DetectionResult> {
     const minY = Math.min(...mmPts.map((p) => p.y))
 
     tools.push({
-      id: crypto.randomUUID(),
+      id: uuid(),
       label: `Tool ${tools.length + 1}`,
       outline: mmPts.map((p) => ({ x: p.x - minX, y: p.y - minY })),
       position: { x: minX, y: minY },

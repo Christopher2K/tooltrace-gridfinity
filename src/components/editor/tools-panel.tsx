@@ -136,8 +136,8 @@ export function ToolsPanel() {
             </div>
 
             <Text textStyle="xs" color="fg.subtle">
-              Rotation: {Math.round(selected.rotationDeg)}° · Double-click outline to edit: drag
-              vertices, drag edge midpoints to curve, double-click to add/remove points
+              Rotation: {Math.round(selected.rotationDeg)}° · Double-click (or long-press) the outline
+              to edit: drag vertices, drag edge midpoints to curve, use the menu to add/remove points
             </Text>
 
             <div className={btnRow}>

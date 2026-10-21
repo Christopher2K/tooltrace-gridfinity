@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { css, cx } from '~/styled-system/css'
 import { Button, IconButton } from '~/components/ui'
+import { useIsTouch } from '~/hooks/use-is-touch'
+import { PINCH_START_EVENT, longPressMenuEvent, setPinchActive, startPointerGesture, type LongPressPoint } from './pointer-gesture'
 import type { Point, View } from './types'
 
 const containerBase = css({ position: 'relative' })
@@ -61,6 +63,8 @@ export interface PanZoomCanvasProps {
   onBackgroundClick?: () => void
   /** Fired on background right-click with the world point and the canvas context. */
   onBackgroundContextMenu?: (worldPoint: Point, e: React.MouseEvent, ctx: PanZoomContextValue) => void
+  /** Fired on background touch long-press with the world point and the canvas context. */
+  onBackgroundLongPress?: (worldPoint: Point, e: LongPressPoint, ctx: PanZoomContextValue) => void
   /** Fired whenever the view changes. */
   onViewChange?: (view: View) => void
   /** Show the zoom control cluster (out / % / in / fit). Default true. */
@@ -78,13 +82,27 @@ function defaultIsBackgroundTarget(target: Element, currentTarget: Element): boo
   return target === currentTarget || target.tagName === 'rect'
 }
 
+interface TrackedPointer {
+  x: number
+  y: number
+  type: string
+}
+
+interface PinchState {
+  startDist: number
+  /** World (mm) point that was under the finger midpoint when the pinch started. */
+  anchorMm: Point
+  startView: View
+}
+
 /**
  * Generic mm-accurate pan/zoom SVG canvas.
  *
- * Figma-style controls (non-passive wheel): scroll pans (Shift = horizontal),
- * pinch / Ctrl+scroll zooms around the cursor, dampened and clamped.
- * Background pointer-drag pans (3 px threshold); background click without
- * movement fires `onBackgroundClick`.
+ * Controls (Figma-style):
+ * - Mouse/trackpad: scroll pans (Shift = horizontal), pinch / Ctrl+scroll zooms around the cursor.
+ * - Touch: one finger on background pans; two fingers pinch-zoom + pan around the midpoint.
+ * - Background pointer-drag pans (slop threshold); click without movement fires `onBackgroundClick`.
+ * - Touch long-press on background fires `onBackgroundLongPress` (context-menu equivalent).
  */
 export function PanZoomCanvas(props: PanZoomCanvasProps) {
   const {
@@ -97,6 +115,7 @@ export function PanZoomCanvas(props: PanZoomCanvasProps) {
     grabbing = false,
     onBackgroundClick,
     onBackgroundContextMenu,
+    onBackgroundLongPress,
     onViewChange,
     showZoomControls = true,
     controlsSlot,
@@ -104,14 +123,115 @@ export function PanZoomCanvas(props: PanZoomCanvasProps) {
     className,
   } = props
 
+  const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const [view, setView] = useState<View | null>(null)
+  const isTouch = useIsTouch()
   const computeFitRef = useRef(computeFit)
   computeFitRef.current = computeFit
   const onViewChangeRef = useRef(onViewChange)
   onViewChangeRef.current = onViewChange
+  const onBackgroundLongPressRef = useRef(onBackgroundLongPress)
+  onBackgroundLongPressRef.current = onBackgroundLongPress
 
   const v = view ?? computeFit()
+
+  const viewRef = useRef(v)
+  viewRef.current = v
+
+  // --- touch pinch-zoom (two fingers anywhere on the canvas) ---
+  const pointersRef = useRef(new Map<number, TrackedPointer>())
+  const pinchRef = useRef<PinchState | null>(null)
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const touchPointers = () => [...pointersRef.current.values()].filter((p) => p.type === 'touch')
+
+    const clientToMm = (cx: number, cy: number): Point => {
+      const rect = svgRef.current!.getBoundingClientRect()
+      const base = viewRef.current
+      return {
+        x: base.x + ((cx - rect.left) / rect.width) * base.w,
+        y: base.y + ((cy - rect.top) / rect.height) * base.h,
+      }
+    }
+
+    const onDown = (e: PointerEvent) => {
+      if (!container.contains(e.target as Node)) return
+      pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY, type: e.pointerType })
+      const pts = touchPointers()
+      if (pts.length === 2) {
+        // Second finger landed: pinch takes over; any one-finger drag aborts via the event.
+        pinchRef.current = {
+          startDist: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y),
+          anchorMm: clientToMm((pts[0].x + pts[1].x) / 2, (pts[0].y + pts[1].y) / 2),
+          startView: viewRef.current,
+        }
+        setPinchActive(true)
+        window.dispatchEvent(new Event(PINCH_START_EVENT))
+      }
+    }
+
+    const onMove = (e: PointerEvent) => {
+      const tracked = pointersRef.current.get(e.pointerId)
+      if (tracked) {
+        tracked.x = e.clientX
+        tracked.y = e.clientY
+      }
+      const pinch = pinchRef.current
+      if (!pinch) return
+      const pts = touchPointers()
+      if (pts.length < 2) return
+      const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y)
+      if (dist === 0 || pinch.startDist === 0) return
+      const rect = svgRef.current!.getBoundingClientRect()
+      const factor = Math.min(Math.max(pinch.startView.w * (pinch.startDist / dist), minViewW), maxViewW) / pinch.startView.w
+      const w = pinch.startView.w * factor
+      const h = pinch.startView.h * factor
+      // Keep the anchor mm point pinned under the current finger midpoint.
+      const midX = (pts[0].x + pts[1].x) / 2
+      const midY = (pts[0].y + pts[1].y) / 2
+      setView({
+        x: pinch.anchorMm.x - ((midX - rect.left) / rect.width) * w,
+        y: pinch.anchorMm.y - ((midY - rect.top) / rect.height) * h,
+        w,
+        h,
+      })
+    }
+
+    const onUp = (e: PointerEvent) => {
+      pointersRef.current.delete(e.pointerId)
+      if (touchPointers().length < 2 && pinchRef.current) {
+        pinchRef.current = null
+        setPinchActive(false)
+      }
+    }
+
+    // Missed pointerups (touchcancel, focus loss, palm rejection) would otherwise
+    // leave stale pointers that poison pinch detection — drop everything.
+    const clearAll = () => {
+      pointersRef.current.clear()
+      pinchRef.current = null
+      setPinchActive(false)
+    }
+
+    window.addEventListener('pointerdown', onDown, true)
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+    window.addEventListener('blur', clearAll)
+    document.addEventListener('visibilitychange', clearAll)
+    return () => {
+      window.removeEventListener('pointerdown', onDown, true)
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+      window.removeEventListener('blur', clearAll)
+      document.removeEventListener('visibilitychange', clearAll)
+    }
+  }, [minViewW, maxViewW])
 
   // Fit view on mount; refit when fitKey changes (if provided).
   useEffect(() => {
@@ -182,56 +302,61 @@ export function PanZoomCanvas(props: PanZoomCanvasProps) {
     }
   }
 
-  // --- background pan / click ---
+  const ctx: PanZoomContextValue = { view: v, toMm, zoomBy, zoomToFit }
+
+  // --- background pan / click / touch long-press ---
   function onBackgroundPointerDown(e: React.PointerEvent) {
     if (!isBackgroundTarget(e.target as Element, e.currentTarget as Element)) return
     const startView = view ?? computeFitRef.current()
     const start = { x: e.clientX, y: e.clientY }
     let moved = false
-    const move = (ev: PointerEvent) => {
-      const dx = ev.clientX - start.x
-      const dy = ev.clientY - start.y
-      if (Math.abs(dx) + Math.abs(dy) > 3) moved = true
-      const rect = svgRef.current!.getBoundingClientRect()
-      setView({
-        ...startView,
-        x: startView.x - (dx / rect.width) * startView.w,
-        y: startView.y - (dy / rect.height) * startView.h,
-      })
-    }
-    const up = () => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-      window.removeEventListener('pointercancel', up)
-      if (!moved) onBackgroundClick?.()
-    }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
-    window.addEventListener('pointercancel', up)
+    startPointerGesture(
+      e,
+      {
+        onMove: (ev) => {
+          const dx = ev.clientX - start.x
+          const dy = ev.clientY - start.y
+          if (Math.abs(dx) + Math.abs(dy) > 3) moved = true
+          const rect = svgRef.current!.getBoundingClientRect()
+          setView({
+            ...startView,
+            x: startView.x - (dx / rect.width) * startView.w,
+            y: startView.y - (dy / rect.height) * startView.h,
+          })
+        },
+        onUp: () => {
+          if (!moved) onBackgroundClick?.()
+        },
+        onLongPress: (point) => {
+          onBackgroundLongPressRef.current?.(toMm(point), point, ctx)
+        },
+      },
+      { moveThreshold: 3 },
+    )
   }
-
-  const ctx: PanZoomContextValue = { view: v, toMm, zoomBy, zoomToFit }
 
   function handleContextMenu(e: React.MouseEvent) {
     if (!isBackgroundTarget(e.target as Element, e.currentTarget as Element)) return
     onBackgroundContextMenu?.(toMm(e), e, ctx)
   }
 
+  const controlSize = isTouch ? 'sm' : 'xs'
+
   return (
-    <div className={className ? cx(containerBase, className) : containerBase}>
+    <div ref={containerRef} className={className ? cx(containerBase, className) : containerBase}>
       {showZoomControls && (
         <div className={zoomControls}>
           {controlsSlot}
-          <IconButton size="xs" variant="plain" aria-label="Zoom out" onClick={() => zoomBy(1 / 0.8)}>
+          <IconButton size={controlSize} variant="plain" aria-label="Zoom out" onClick={() => zoomBy(1 / 0.8)}>
             −
           </IconButton>
           <button className={zoomPct} title="Zoom to fit" onClick={zoomToFit}>
             {Math.round((computeFit().w / v.w) * 100)}%
           </button>
-          <IconButton size="xs" variant="plain" aria-label="Zoom in" onClick={() => zoomBy(0.8)}>
+          <IconButton size={controlSize} variant="plain" aria-label="Zoom in" onClick={() => zoomBy(0.8)}>
             +
           </IconButton>
-          <Button size="xs" variant="outline" onClick={zoomToFit}>
+          <Button size={controlSize} variant="outline" onClick={zoomToFit}>
             Fit
           </Button>
         </div>
@@ -248,3 +373,6 @@ export function PanZoomCanvas(props: PanZoomCanvasProps) {
     </div>
   )
 }
+
+/** Re-exported for consumers building long-press context menus. */
+export { longPressMenuEvent }

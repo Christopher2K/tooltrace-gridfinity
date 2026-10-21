@@ -4,15 +4,18 @@ import { css } from '~/styled-system/css'
 import { IconButton } from '~/components/ui'
 import { bboxCenter, bboxOf, flattenOutline, insertVertex, nearestEdgeProjection, offsetPolygon, outlinePath, quadPoint, removeVertex, rotatePoint, setEdgeCurve } from '~/lib/geometry'
 import { GRID_UNIT_MM, useEditorStore, type Point, type ToolTrace } from '~/stores/editor'
-import { ContextMenuPopover, PanZoomCanvas, useContextMenu, type PanZoomContextValue, type View } from '~/components/canvas'
+import { ContextMenuPopover, PanZoomCanvas, longPressMenuEvent, startPointerGesture, useContextMenu, type MenuItem, type PanZoomContextValue, type View } from '~/components/canvas'
+import { useIsTouch } from '~/hooks/use-is-touch'
 
 const container = css({
   borderWidth: '1px',
   borderColor: 'border',
   borderRadius: 'l3',
   overflow: 'hidden',
-  h: '[calc(100vh - 140px)]',
-  minH: '480px',
+  // Phones/tablets: fixed share of the viewport above the stacked panels.
+  // Desktop: fill the grid row (the editor grid stretches to the main area).
+  h: { base: '[58dvh]', lg: 'full' },
+  minH: { base: '320px', lg: '0' },
   bg: 'gray.a1',
 })
 const toolPoly = css({
@@ -54,6 +57,7 @@ export function EditorCanvas() {
   const [dragging, setDragging] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const { menu, openMenu, closeMenu } = useContextMenu()
+  const isTouch = useIsTouch()
 
   /** Bounds of tray + all tools, padded. */
   function computeFit(): View {
@@ -76,6 +80,16 @@ export function EditorCanvas() {
     return snapMm > 0 ? Math.round(v / snapMm) * snapMm : Math.round(v * 10) / 10
   }
 
+  function backgroundMenuItems(p: Point, ctx: PanZoomContextValue): MenuItem[] {
+    return [
+      { label: 'Add rectangle here', onSelect: () => addShape('rectangle', p) },
+      { label: 'Add circle here', onSelect: () => addShape('circle', p) },
+      { label: 'Add notch here', onSelect: () => addShape('notch', p) },
+      { label: '', onSelect: () => {}, separator: true },
+      { label: 'Zoom to fit', onSelect: ctx.zoomToFit },
+    ]
+  }
+
   /** Converts tray mm → tool-local mm (undo position + rotation). */
   function toLocal(tool: ToolTrace, trayP: Point): Point {
     const c = bboxCenter(tool.outline)
@@ -96,95 +110,23 @@ export function EditorCanvas() {
   }
 
   function renderTools({ view: v, toMm }: PanZoomContextValue) {
-    // --- tool drag ---
-    function onToolPointerDown(e: React.PointerEvent, tool: ToolTrace) {
-      if (editingId === tool.id) return // vertex editing mode handles its own drags
-      e.stopPropagation()
-      selectTool(tool.id)
-      setDragging(true)
-      beginTransient() // one undo entry per drag gesture
-      const start = toMm(e)
-      const orig = { ...tool.position }
-      const move = (ev: PointerEvent) => {
-        const p = toMm(ev)
-        updateToolTransient(tool.id, {
-          position: { x: snap(orig.x + p.x - start.x), y: snap(orig.y + p.y - start.y) },
-        })
-      }
-      const up = () => {
-        window.removeEventListener('pointermove', move)
-        window.removeEventListener('pointerup', up)
-        window.removeEventListener('pointercancel', up)
-        setDragging(false)
-      }
-      window.addEventListener('pointermove', move)
-      window.addEventListener('pointerup', up)
-      window.addEventListener('pointercancel', up)
-    }
-
-    // --- vertex drag (edit mode) ---
-    function onVertexPointerDown(e: React.PointerEvent, tool: ToolTrace, index: number) {
-      e.stopPropagation()
-      beginTransient()
-      const move = (ev: PointerEvent) => {
-        const local = toLocal(tool, toMm(ev))
-        const outline = tool.outline.map((p, i) =>
-          i === index ? { x: Math.round(local.x * 10) / 10, y: Math.round(local.y * 10) / 10 } : p,
-        )
-        updateToolTransient(tool.id, { outline })
-      }
-      const up = () => {
-        window.removeEventListener('pointermove', move)
-        window.removeEventListener('pointerup', up)
-        window.removeEventListener('pointercancel', up)
-      }
-      window.addEventListener('pointermove', move)
-      window.addEventListener('pointerup', up)
-      window.addEventListener('pointercancel', up)
-    }
-
-    /** Double-click a vertex → delete it (keeps ≥ 3 vertices). */
-    function onVertexDoubleClick(e: React.MouseEvent, tool: ToolTrace, index: number) {
-      e.stopPropagation()
-      const patch = removeVertex(tool, index)
-      if (patch) updateTool(tool.id, patch)
-    }
-
-    // --- edge midpoint: drag pulls a curve, double-click inserts a vertex ---
-    function onMidPointerDown(e: React.PointerEvent, tool: ToolTrace, edge: number) {
-      e.stopPropagation()
-      beginTransient()
-      const move = (ev: PointerEvent) => {
-        const local = toLocal(tool, toMm(ev))
-        updateToolTransient(tool.id, setEdgeCurve(tool, edge, local))
-      }
-      const up = () => {
-        window.removeEventListener('pointermove', move)
-        window.removeEventListener('pointerup', up)
-        window.removeEventListener('pointercancel', up)
-      }
-      window.addEventListener('pointermove', move)
-      window.addEventListener('pointerup', up)
-      window.addEventListener('pointercancel', up)
-    }
-
-    function onMidDoubleClick(e: React.MouseEvent, tool: ToolTrace, edge: number) {
-      e.stopPropagation()
-      const n = tool.outline.length
-      const p0 = tool.outline[edge]
-      const p1 = tool.outline[(edge + 1) % n]
-      const c = tool.curves?.[edge]
-      const mid = c ? quadPoint(p0, c, p1, 0.5) : { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 }
-      updateTool(tool.id, insertVertex(tool, edge, mid))
-    }
-
-    // --- context menus (native contextmenu event + HTML popover) ---
-    function onShapeContextMenu(e: React.MouseEvent, tool: ToolTrace) {
+    // --- context-menu builders (shared by right-click and touch long-press) ---
+    function shapeMenuItems(tool: ToolTrace, localPoint?: Point): MenuItem[] {
       if (editingId === tool.id) {
-        const local = toLocal(tool, toMm(e))
-        const { edge, point } = nearestEdgeProjection(tool, local)
-        openMenu(e, [
-          { label: 'Add point here', onSelect: () => updateTool(tool.id, insertVertex(tool, edge, point)) },
+        return [
+          ...(localPoint
+            ? [
+                {
+                  label: 'Add point here',
+                  onSelect: () => {
+                    const { edge, point } = nearestEdgeProjection(tool, localPoint)
+                    updateTool(tool.id, insertVertex(tool, edge, point))
+                  },
+                },
+                { label: '', onSelect: () => {}, separator: true },
+              ]
+            : []),
+          { label: 'Done editing', onSelect: () => setEditingId(null) },
           { label: '', onSelect: () => {}, separator: true },
           {
             label: 'Delete tool',
@@ -194,25 +136,24 @@ export function EditorCanvas() {
               setEditingId(null)
             },
           },
-        ])
-      } else {
-        openMenu(e, [
-          {
-            label: 'Edit outline',
-            onSelect: () => {
-              selectTool(tool.id)
-              setEditingId(tool.id)
-            },
-          },
-          { label: 'Duplicate', onSelect: () => duplicateTool(tool.id) },
-          { label: '', onSelect: () => {}, separator: true },
-          { label: 'Delete', danger: true, onSelect: () => removeTool(tool.id) },
-        ])
+        ]
       }
+      return [
+        {
+          label: 'Edit outline',
+          onSelect: () => {
+            selectTool(tool.id)
+            setEditingId(tool.id)
+          },
+        },
+        { label: 'Duplicate', onSelect: () => duplicateTool(tool.id) },
+        { label: '', onSelect: () => {}, separator: true },
+        { label: 'Delete', danger: true, onSelect: () => removeTool(tool.id) },
+      ]
     }
 
-    function onVertexContextMenu(e: React.MouseEvent, tool: ToolTrace, index: number) {
-      openMenu(e, [
+    function vertexMenuItems(tool: ToolTrace, index: number): MenuItem[] {
+      return [
         {
           label: 'Delete point',
           disabled: tool.outline.length <= 3,
@@ -230,21 +171,106 @@ export function EditorCanvas() {
             setEditingId(null)
           },
         },
-      ])
+      ]
     }
 
-    function onMidContextMenu(e: React.MouseEvent, tool: ToolTrace, edge: number) {
+    function midMenuItems(tool: ToolTrace, edge: number, localPoint: Point): MenuItem[] {
       const curve = tool.curves?.[edge]
-      const local = toLocal(tool, toMm(e))
-      openMenu(e, [
+      return [
         {
           label: 'Add point here',
-          onSelect: () => updateTool(tool.id, insertVertex(tool, edge, local)),
+          onSelect: () => updateTool(tool.id, insertVertex(tool, edge, localPoint)),
         },
         curve
           ? { label: 'Straighten edge', onSelect: () => updateTool(tool.id, setEdgeCurve(tool, edge, null)) }
           : { label: 'Drag handle to curve the edge', disabled: true, onSelect: () => {} },
-      ])
+      ]
+    }
+
+    // --- tool drag ---
+    function onToolPointerDown(e: React.PointerEvent, tool: ToolTrace) {
+      if (editingId === tool.id) return // vertex editing mode handles its own drags
+      e.stopPropagation()
+      selectTool(tool.id)
+      setDragging(true)
+      beginTransient() // one undo entry per drag gesture
+      const start = toMm(e)
+      const orig = { ...tool.position }
+      const endDrag = () => setDragging(false)
+      startPointerGesture(e, {
+        onMove: (ev) => {
+          const p = toMm(ev)
+          updateToolTransient(tool.id, {
+            position: { x: snap(orig.x + p.x - start.x), y: snap(orig.y + p.y - start.y) },
+          })
+        },
+        onUp: endDrag,
+        onAbort: endDrag,
+        onLongPress: (point) => {
+          endDrag()
+          openMenu(longPressMenuEvent(point), shapeMenuItems(tool, toLocal(tool, toMm(point))))
+        },
+      })
+    }
+
+    // --- vertex drag (edit mode) ---
+    function onVertexPointerDown(e: React.PointerEvent, tool: ToolTrace, index: number) {
+      e.stopPropagation()
+      beginTransient()
+      startPointerGesture(e, {
+        onMove: (ev) => {
+          const local = toLocal(tool, toMm(ev))
+          const outline = tool.outline.map((p, i) =>
+            i === index ? { x: Math.round(local.x * 10) / 10, y: Math.round(local.y * 10) / 10 } : p,
+          )
+          updateToolTransient(tool.id, { outline })
+        },
+        onLongPress: (point) => openMenu(longPressMenuEvent(point), vertexMenuItems(tool, index)),
+      })
+    }
+
+    /** Double-click a vertex → delete it (keeps ≥ 3 vertices). */
+    function onVertexDoubleClick(e: React.MouseEvent, tool: ToolTrace, index: number) {
+      e.stopPropagation()
+      const patch = removeVertex(tool, index)
+      if (patch) updateTool(tool.id, patch)
+    }
+
+    // --- edge midpoint: drag pulls a curve, double-click inserts a vertex ---
+    function onMidPointerDown(e: React.PointerEvent, tool: ToolTrace, edge: number) {
+      e.stopPropagation()
+      beginTransient()
+      startPointerGesture(e, {
+        onMove: (ev) => {
+          const local = toLocal(tool, toMm(ev))
+          updateToolTransient(tool.id, setEdgeCurve(tool, edge, local))
+        },
+        onLongPress: (point) =>
+          openMenu(longPressMenuEvent(point), midMenuItems(tool, edge, toLocal(tool, toMm(point)))),
+      })
+    }
+
+    function onMidDoubleClick(e: React.MouseEvent, tool: ToolTrace, edge: number) {
+      e.stopPropagation()
+      const n = tool.outline.length
+      const p0 = tool.outline[edge]
+      const p1 = tool.outline[(edge + 1) % n]
+      const c = tool.curves?.[edge]
+      const mid = c ? quadPoint(p0, c, p1, 0.5) : { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 }
+      updateTool(tool.id, insertVertex(tool, edge, mid))
+    }
+
+    // --- context menus (native contextmenu event + HTML popover) ---
+    function onShapeContextMenu(e: React.MouseEvent, tool: ToolTrace) {
+      openMenu(e, shapeMenuItems(tool, editingId === tool.id ? toLocal(tool, toMm(e)) : undefined))
+    }
+
+    function onVertexContextMenu(e: React.MouseEvent, tool: ToolTrace, index: number) {
+      openMenu(e, vertexMenuItems(tool, index))
+    }
+
+    function onMidContextMenu(e: React.MouseEvent, tool: ToolTrace, edge: number) {
+      openMenu(e, midMenuItems(tool, edge, toLocal(tool, toMm(e))))
     }
 
     return (
@@ -259,7 +285,7 @@ export function EditorCanvas() {
           const transform = `translate(${tool.position.x} ${tool.position.y}) rotate(${tool.rotationDeg} ${c.x} ${c.y})`
           const selected = tool.id === selectedToolId
           const editing = editingId === tool.id
-          const handleR = Math.max(v.w, v.h) * 0.006
+          const handleR = Math.max(v.w, v.h) * 0.006 * (isTouch ? 1.9 : 1)
           return (
             <g key={tool.id} transform={transform}>
               {tool.toleranceMm > 0 && (
@@ -342,13 +368,10 @@ export function EditorCanvas() {
           setEditingId(null)
         }}
         onBackgroundContextMenu={(p, e, ctx) => {
-          openMenu(e, [
-            { label: 'Add rectangle here', onSelect: () => addShape('rectangle', p) },
-            { label: 'Add circle here', onSelect: () => addShape('circle', p) },
-            { label: 'Add notch here', onSelect: () => addShape('notch', p) },
-            { label: '', onSelect: () => {}, separator: true },
-            { label: 'Zoom to fit', onSelect: ctx.zoomToFit },
-          ])
+          openMenu(e, backgroundMenuItems(p, ctx))
+        }}
+        onBackgroundLongPress={(p, e, ctx) => {
+          openMenu(longPressMenuEvent(e), backgroundMenuItems(p, ctx))
         }}
         controlsSlot={
           <>

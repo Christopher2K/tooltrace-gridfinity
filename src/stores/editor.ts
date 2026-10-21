@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { bboxOf, circleOutline, notchOutline, rectOutline } from '~/lib/geometry'
+import { uuid } from '~/lib/uuid'
 
 /** A 2D point in millimeters, tray coordinate space. */
 export interface Point {
@@ -141,7 +142,7 @@ export const useEditorStore = create<EditorState>()(
             : { x: (trayW - b.w) / 2, y: (trayH - b.h) / 2 }
           const count = s.tools.filter((t) => t.isShape).length + 1
           const tool: ToolTrace = {
-            id: crypto.randomUUID(),
+            id: uuid(),
             label: `${shapeLabels[kind]} ${count}`,
             outline,
             position,
@@ -174,7 +175,7 @@ export const useEditorStore = create<EditorState>()(
           if (!src) return s
           const copy: ToolTrace = {
             ...src,
-            id: crypto.randomUUID(),
+            id: uuid(),
             label: `${src.label} copy`,
             outline: src.outline.map((p) => ({ ...p })),
             curves: src.curves ? { ...src.curves } : undefined,

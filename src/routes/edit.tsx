@@ -55,9 +55,24 @@ function Editor() {
   }, [])
 
   return (
-    <div className={css({ display: 'grid', gridTemplateColumns: '240px 1fr 300px', gap: '4', alignItems: 'start' })}>
+    <div
+      className={css({
+        display: 'grid',
+        gap: '4',
+        alignItems: 'start',
+        // Desktop: tray | canvas | side panels, filling the viewport height.
+        // Below lg: single column with the canvas first, panels stacked underneath.
+        gridTemplateColumns: { base: '1fr', lg: '240px minmax(0, 1fr) 300px' },
+        gridTemplateRows: { lg: 'minmax(0, 1fr)' },
+        flex: { lg: '1' },
+        minH: { lg: '0' },
+      })}
+    >
       <TrayPanel />
-      <EditorCanvas />
+      {/* Canvas first on mobile via `order`; middle column at lg (DOM order). */}
+      <div className={css({ order: { base: -1, lg: 0 }, alignSelf: { lg: 'stretch' }, minW: '0', h: { lg: 'full' } })}>
+        <EditorCanvas />
+      </div>
       <div className={css({ display: 'flex', flexDir: 'column', gap: '4' })}>
         <ExportPanel />
         <ToolsPanel />
