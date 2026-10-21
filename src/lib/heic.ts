@@ -15,19 +15,44 @@ export function isHeicFile(file: File): boolean {
   return /\.hei[cf]$/i.test(file.name)
 }
 
-/** Returns the input unchanged for non-HEIC files; converts HEIC/HEIF to a JPEG File otherwise. */
+/** Extract a readable message from whatever heic2any throws (often {code, message} objects). */
+function describeError(e: unknown): string {
+  if (e instanceof Error) return e.message
+  if (e && typeof e === 'object' && 'message' in e) return String((e as { message: unknown }).message)
+  return String(e)
+}
+
+/**
+ * Returns the input unchanged when the browser can decode it directly; converts
+ * HEIC/HEIF to a JPEG File otherwise.
+ *
+ * Strategy: try the native decoder FIRST — Safari (iOS/macOS) decodes HEIC via
+ * the OS, which is faster and far more tolerant than the bundled WASM libheif.
+ * Only when native decoding fails (Chrome/Firefox) do we load heic2any.
+ */
 export async function convertIfHeic(file: File): Promise<File> {
   if (!isHeicFile(file)) return file
 
-  // Dynamic import: keeps the libheif WASM out of the initial bundle and out of SSR.
+  // 1. Native decode (Safari on Apple platforms supports HEIC system-wide).
+  try {
+    const probe = await createImageBitmap(file)
+    probe.close()
+    return file // browser can read it as-is — no conversion needed
+  } catch {
+    // expected on Chrome/Firefox — fall through to WASM conversion
+  }
+
+  // 2. WASM conversion via heic2any (dynamic import keeps libheif out of the
+  // initial bundle and out of SSR).
   const { default: heic2any } = await import('heic2any')
 
   let converted: Blob | Blob[]
   try {
     converted = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.92 })
-  } catch {
+  } catch (e) {
     throw new Error(
-      'Could not convert this HEIC photo. On iPhone, try Settings → Camera → Formats → Most Compatible, or retake the photo as JPEG.'
+      `Could not convert this HEIC photo (${describeError(e)}). ` +
+        'On iPhone, try Settings → Camera → Formats → Most Compatible, or retake the photo as JPEG.',
     )
   }
 
