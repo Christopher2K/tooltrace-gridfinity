@@ -5,6 +5,7 @@ import { css } from '~/styled-system/css'
 import { Button, Card, FileUpload, Heading, Slider, Spinner, Switch, Text } from '~/components/ui'
 import { downloadPdf, type PaperSize } from '~/lib/pdf'
 import { generateTemplatePdf } from '~/lib/template'
+import { convertIfHeic } from '~/lib/heic'
 import { detectInScan, prepareScan, setTemplatePaperSize, type PreparedScan, type QuadSource } from '~/lib/vision'
 import type { Point, ToolTrace } from '~/stores/editor'
 import { useEditorStore } from '~/stores/editor'
@@ -30,6 +31,7 @@ function orderCorners(pts: Point[]): Point[] {
 
 function NewTrace() {
   const [processing, setProcessing] = useState(false)
+  const [converting, setConverting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [scan, setScan] = useState<PreparedScan | null>(null)
   const [detected, setDetected] = useState<ToolTrace[]>([])
@@ -50,8 +52,14 @@ function NewTrace() {
     setProcessing(true)
     setError(null)
     setScan(null)
+    // HEIC photos (iPhone default) can't be decoded by any browser — convert to JPEG first.
+    // Declared outside try so the manual corner-pick fallback can use the converted file too.
+    let converted = file
     try {
-      const prepared = await prepareScan(file, manualQuad ? { manualQuad } : {})
+      setConverting(true)
+      converted = await convertIfHeic(file)
+      setConverting(false)
+      const prepared = await prepareScan(converted, manualQuad ? { manualQuad } : {})
       const { tools, toolMaskUrl } = detectInScan(prepared)
       if (tools.length === 0) {
         throw new Error('No tools detected. Use a plain white sheet and dark, contrasting tools.')
@@ -64,8 +72,9 @@ function NewTrace() {
       setManual(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Detection failed.')
-      setLastFile(file)
+      setLastFile(converted)
     } finally {
+      setConverting(false)
       setProcessing(false)
     }
   }
@@ -141,12 +150,12 @@ function NewTrace() {
           <Card.Root>
             <Card.Header>
               <Card.Title>Upload photo</Card.Title>
-              <Card.Description>JPG or PNG, taken straight from above</Card.Description>
+              <Card.Description>JPG, PNG or HEIC, taken straight from above</Card.Description>
             </Card.Header>
             <Card.Body className={css({ display: 'flex', flexDir: 'column', gap: '3' })}>
               <FileUpload.Root
                 maxFiles={1}
-                accept={['image/jpeg', 'image/png']}
+                accept={['image/jpeg', 'image/png', 'image/heic', 'image/heif']}
                 onFileAccept={(details) => {
                   const file = details.files[0]
                   if (file) runDetection(file)
@@ -156,7 +165,11 @@ function NewTrace() {
                   <div className={css({ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '2', color: 'fg.muted' })}>
                     {processing && <Spinner size="sm" />}
                     <Text color="fg.muted">
-                      {processing ? 'Detecting tools…' : 'Drag & drop your photo here, or click to browse'}
+                      {processing
+                        ? converting
+                          ? 'Converting HEIC photo…'
+                          : 'Detecting tools…'
+                        : 'Drag & drop your photo here, or click to browse'}
                     </Text>
                   </div>
                 </FileUpload.Dropzone>

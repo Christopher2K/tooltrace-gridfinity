@@ -23,6 +23,9 @@ importers:
       earcut:
         specifier: ^3.2.4
         version: 3.2.4
+      heic2any:
+        specifier: ^0.0.4
+        version: 0.0.4
       lucide-react:
         specifier: ^0.510.0
         version: 0.510.0(react@19.3.1)
@@ -1438,6 +1441,9 @@ packages:
         optional: true
       ocache:
         optional: true
+
+  heic2any@0.0.4:
+    resolution: {integrity: sha512-3lLnZiDELfabVH87htnRolZ2iehX9zwpRyGNz22GKXIu0fznlblf0/ftppXKNqS26dqFSeqfIBhAmAj/uSp0cA==}
 
   hookable@6.1.2:
     resolution: {integrity: sha512-+abwxtiEA52GCVIsQqut3S/uKTbUwYIp4Pe/vv+6py5XiXBCqMZHg6pA6Y5qhgLSEys0/cYuPbO0z1QFj5ZCmg==}
@@ -3969,6 +3975,8 @@ snapshots:
     optionalDependencies:
       crossws: 0.4.15(srvx@1.0.5)
       ocache: 0.3.0
+
+  heic2any@0.0.4: {}
 
   hookable@6.1.2: {}
 
