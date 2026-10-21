@@ -11,6 +11,29 @@ export interface DetectionResult {
   debug?: Record<string, string>
 }
 
+/** User-tunable detection parameters (confidence/adjust UI). */
+export interface DetectionOptions {
+  /** Offset added to the Otsu tool threshold (-40…+40). Higher = catches lighter tools. */
+  thresholdOffset?: number
+  /** Contour simplification scale (0.3…2). Lower = more detail/vertices. Default 1. */
+  detailScale?: number
+}
+
+/** A rectified top-down scan, ready for (re-)detection with different options. */
+export interface PreparedScan {
+  /** Rectified grayscale pixels (row-major, 0–255). */
+  rect: Uint8Array
+  width: number
+  height: number
+  mmPerPx: number
+  paperSizeMm: { width: number; height: number }
+  /** Otsu threshold computed on the rectified image (before user offset). */
+  baseThreshold: number
+  /** Object URL of the rectified top-down paper image (JPEG). */
+  rectifiedImageUrl: string
+  debug: Record<string, string>
+}
+
 function maskToDataUrl(mask: Uint8Array, labels: Int32Array | null, width: number, height: number): string {
   const canvas = document.createElement('canvas')
   canvas.width = width
@@ -322,8 +345,11 @@ function simplify(points: Point[], epsilon: number): Point[] {
  * Detects the paper sheet and dark tool outlines in a top-down photo.
  * Pure Canvas2D/JS implementation (no WASM). Client-side only.
  * Returns tool outlines in millimeters (origin = paper top-left).
+ * Prepare a photo for detection: find the paper, rectify to top-down, calibrate scale.
+ * Detection itself (`detectInScan`) is separate so users can re-run it with
+ * adjusted threshold/detail settings without repeating the expensive warp.
  */
-export async function detectTools(file: File): Promise<DetectionResult> {
+export async function prepareScan(file: File): Promise<PreparedScan> {
   const img = await loadBitmap(file)
 
   // --- 1. Paper detection at low resolution ---
@@ -439,8 +465,39 @@ export async function detectTools(file: File): Promise<DetectionResult> {
     }
   }
 
-  // --- 3. Tool detection: dark components on the white rectified paper ---
-  const toolT = otsuThreshold(rect)
+  // Rectified preview image
+  const rectifiedImageUrl = grayToDataUrl(rect, dstW, dstH)
+  const blob = await (await fetch(rectifiedImageUrl)).blob()
+
+  return {
+    rect,
+    width: dstW,
+    height: dstH,
+    mmPerPx,
+    paperSizeMm: { width: paperWmm, height: paperHmm },
+    baseThreshold: otsuThreshold(rect),
+    rectifiedImageUrl: URL.createObjectURL(blob),
+    debug: {
+      paperMask: maskToDataUrl(paperMask, null, lo.width, lo.height),
+      rectified: rectifiedImageUrl,
+      quad: JSON.stringify([tl, tr, br, bl]),
+    },
+  }
+}
+
+/**
+ * Detect tool outlines in a prepared scan. Cheap enough to re-run live while
+ * the user adjusts `thresholdOffset` / `detailScale`.
+ */
+export function detectInScan(
+  scan: PreparedScan,
+  options: DetectionOptions = {},
+): { tools: ToolTrace[]; toolMaskUrl: string } {
+  const { thresholdOffset = 0, detailScale = 1 } = options
+  const { rect, width: dstW, height: dstH, mmPerPx } = scan
+
+  // --- Tool detection: dark components on the white rectified paper ---
+  const toolT = Math.min(255, Math.max(0, Math.round(scan.baseThreshold + thresholdOffset)))
   const toolMask = new Uint8Array(rect.length)
   for (let i = 0; i < rect.length; i++) toolMask[i] = rect[i] < toolT ? 1 : 0
 
@@ -454,7 +511,7 @@ export async function detectTools(file: File): Promise<DetectionResult> {
     if (size < minArea) continue
     const boundary = traceContour(labels, dstW, dstH, label)
     if (boundary.length < 8) continue
-    const epsilon = Math.max(1.5, Math.sqrt(size) * 0.01)
+    const epsilon = Math.max(1.5, Math.sqrt(size) * 0.01) * detailScale
     const simplified = simplify(boundary, epsilon)
 
     const mmPts = simplified.map((p) => ({ x: p.x * mmPerPx, y: p.y * mmPerPx }))
@@ -472,20 +529,18 @@ export async function detectTools(file: File): Promise<DetectionResult> {
     })
   }
 
-  // Rectified preview image
-  const rectifiedImageUrl = grayToDataUrl(rect, dstW, dstH)
-  const blob = await (await fetch(rectifiedImageUrl)).blob()
+  return { tools, toolMaskUrl: maskToDataUrl(toolMask, labels, dstW, dstH) }
+}
 
+/** One-shot convenience wrapper: prepare + detect with default options. */
+export async function detectTools(file: File, options: DetectionOptions = {}): Promise<DetectionResult> {
+  const scan = await prepareScan(file)
+  const { tools, toolMaskUrl } = detectInScan(scan, options)
   return {
     tools,
-    paperSizeMm: { width: paperWmm, height: paperHmm },
-    mmPerPx,
-    rectifiedImageUrl: URL.createObjectURL(blob),
-    debug: {
-      paperMask: maskToDataUrl(paperMask, null, lo.width, lo.height),
-      rectified: rectifiedImageUrl,
-      toolMask: maskToDataUrl(toolMask, labels, dstW, dstH),
-      quad: JSON.stringify([tl, tr, br, bl]),
-    },
+    paperSizeMm: scan.paperSizeMm,
+    mmPerPx: scan.mmPerPx,
+    rectifiedImageUrl: scan.rectifiedImageUrl,
+    debug: { ...scan.debug, toolMask: toolMaskUrl },
   }
 }
