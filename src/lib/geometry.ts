@@ -49,6 +49,29 @@ export function toolPoints(tool: ToolTrace): Point[] {
   })
 }
 
+/**
+ * Position that centers the tool's outline bbox on a tray of the given size.
+ * The bbox is computed from the rotated outline (rotationDeg about the bbox
+ * center), so rotated tools center correctly. With axis 'x' or 'y' the other
+ * axis keeps its current position.
+ */
+export function centeredPosition(
+  tool: ToolTrace,
+  trayW: number,
+  trayH: number,
+  axis: 'x' | 'y' | 'both',
+): Point {
+  const flat = flattenOutline(tool)
+  const pts = tool.rotationDeg
+    ? flat.map((p) => rotatePoint(p, bboxCenter(flat), tool.rotationDeg))
+    : flat
+  const b = bboxOf(pts)
+  const pos = { ...tool.position }
+  if (axis !== 'y') pos.x = (trayW - b.w) / 2 - b.x
+  if (axis !== 'x') pos.y = (trayH - b.h) / 2 - b.y
+  return pos
+}
+
 /** Point on a quadratic Bézier at t ∈ [0,1]. */
 export function quadPoint(p0: Point, c: Point, p1: Point, t: number): Point {
   const u = 1 - t

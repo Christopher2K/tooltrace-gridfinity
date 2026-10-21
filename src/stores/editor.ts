@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { bboxOf, circleOutline, notchOutline, rectOutline } from '~/lib/geometry'
+import { bboxOf, centeredPosition, circleOutline, notchOutline, rectOutline } from '~/lib/geometry'
 import { uuid } from '~/lib/uuid'
 
 /** A 2D point in millimeters, tray coordinate space. */
@@ -76,6 +76,8 @@ interface EditorState {
   duplicateTool: (id: string) => void
   rotateTool: (id: string, deltaDeg: number) => void
   flipTool: (id: string, axis: 'x' | 'y') => void
+  /** Centers the tool's outline bbox on the tray (respects snapMm). */
+  centerTool: (id: string, axis: 'x' | 'y' | 'both') => void
   selectTool: (id: string | null) => void
   setSnapMm: (mm: number) => void
   undo: () => void
@@ -204,6 +206,22 @@ export const useEditorStore = create<EditorState>()(
           }),
           ...record(s),
         })),
+      centerTool: (id, axis) =>
+        set((s) => {
+          const tool = s.tools.find((t) => t.id === id)
+          if (!tool) return s
+          const trayW = s.tray.widthUnits * GRID_UNIT_MM
+          const trayH = s.tray.heightUnits * GRID_UNIT_MM
+          const pos = centeredPosition(tool, trayW, trayH, axis)
+          // Same rounding as canvas drags: snap grid when on, else 0.1 mm.
+          const snapV = (v: number) =>
+            s.snapMm > 0 ? Math.round(v / s.snapMm) * s.snapMm : Math.round(v * 10) / 10
+          const position = { x: snapV(pos.x), y: snapV(pos.y) }
+          return {
+            tools: s.tools.map((t) => (t.id === id ? { ...t, position } : t)),
+            ...record(s),
+          }
+        }),
       selectTool: (id) => set({ selectedToolId: id }),
       setSnapMm: (mm) => set({ snapMm: mm }),
       undo: () =>

@@ -45,6 +45,7 @@ export function ToolsPanel() {
   const duplicateTool = useEditorStore((s) => s.duplicateTool)
   const rotateTool = useEditorStore((s) => s.rotateTool)
   const flipTool = useEditorStore((s) => s.flipTool)
+  const centerTool = useEditorStore((s) => s.centerTool)
   const addShape = useEditorStore((s) => s.addShape)
 
   const selected = tools.find((t) => t.id === selectedToolId) ?? null
@@ -139,6 +140,18 @@ export function ToolsPanel() {
               Rotation: {Math.round(selected.rotationDeg)}° · Double-click (or long-press) the outline
               to edit: drag vertices, drag edge midpoints to curve, use the menu to add/remove points
             </Text>
+
+            <div className={btnRow}>
+              <Button size="sm" variant="outline" onClick={() => centerTool(selected.id, 'x')}>
+                Center H
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => centerTool(selected.id, 'y')}>
+                Center V
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => centerTool(selected.id, 'both')}>
+                Center both
+              </Button>
+            </div>
 
             <div className={btnRow}>
               <Button size="sm" variant="outline" onClick={() => duplicateTool(selected.id)}>

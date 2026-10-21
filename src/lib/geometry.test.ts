@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   bboxCenter,
   bboxOf,
+  centeredPosition,
   circleOutline,
   cleanPolygon,
   clipPolygonToRect,
@@ -215,5 +216,34 @@ describe('shape generators', () => {
     const pts = notchOutline(12, 24)
     expect(pts.length).toBeGreaterThan(10)
     expect(bboxOf(pts).w).toBeCloseTo(24, 1)
+  })
+})
+
+describe('centeredPosition', () => {
+  it('centers an unrotated outline bbox on the tray', () => {
+    const tool = makeTool({ outline: sq(10), position: { x: 3, y: 7 } })
+    expect(centeredPosition(tool, 100, 50, 'both')).toEqual({ x: 45, y: 20 })
+  })
+
+  it('keeps the other axis when centering only one', () => {
+    const tool = makeTool({ outline: sq(10), position: { x: 3, y: 7 } })
+    expect(centeredPosition(tool, 100, 50, 'x')).toEqual({ x: 45, y: 7 })
+    expect(centeredPosition(tool, 100, 50, 'y')).toEqual({ x: 3, y: 20 })
+  })
+
+  it('centers using the rotated bbox when rotationDeg !== 0', () => {
+    // 10×20 rect rotated 90° about its bbox center (5,10) → bbox 20×10 at (-5,5)
+    const tool = makeTool({
+      outline: [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 10, y: 20 },
+        { x: 0, y: 20 },
+      ],
+      rotationDeg: 90,
+    })
+    const p = centeredPosition(tool, 100, 50, 'both')
+    expect(p.x).toBeCloseTo(45)
+    expect(p.y).toBeCloseTo(15)
   })
 })
