@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { Redo2, Undo2 } from 'lucide-react'
 import { css } from '~/styled-system/css'
 import { IconButton } from '~/components/ui'
-import { bboxCenter, bboxOf, flattenOutline, insertVertex, nearestEdgeProjection, offsetPolygon, outlinePath, quadPoint, removeVertex, rotatePoint, setEdgeCurve } from '~/lib/geometry'
+import { bboxCenter, bboxOf, flattenOutline, insertVertex, nearestEdgeProjection, offsetPolygon, outlinePath, quadPoint, removeVertex, rotatePoint, setEdgeCurve, toolPoints } from '~/lib/geometry'
+import { computeAlignmentSnap, type SnapGuide } from '~/lib/snap'
 import { GRID_UNIT_MM, useEditorStore, type Point, type ToolTrace } from '~/stores/editor'
 import { ContextMenuPopover, PanZoomCanvas, longPressMenuEvent, startPointerGesture, useContextMenu, type MenuItem, type PanZoomContextValue, type View } from '~/components/canvas'
 import { useIsTouch } from '~/hooks/use-is-touch'
@@ -33,6 +34,7 @@ const toolPolySelected = css({
 const toleranceLine = css({ fill: 'none', stroke: 'grass.8', strokeDasharray: '2 2', pointerEvents: 'none' })
 const vertexHandle = css({ fill: 'bg.default', stroke: 'grass.9', cursor: 'move' })
 const midHandle = css({ fill: 'grass.a4', stroke: 'grass.8', cursor: 'copy' })
+const snapGuide = css({ stroke: 'grass.9', strokeDasharray: '1.5 1.5', pointerEvents: 'none' })
 
 export function EditorCanvas() {
   const tools = useEditorStore((s) => s.tools)
@@ -55,6 +57,7 @@ export function EditorCanvas() {
   const trayH = tray.heightUnits * GRID_UNIT_MM
 
   const [dragging, setDragging] = useState(false)
+  const [guides, setGuides] = useState<SnapGuide[]>([])
   const [editingId, setEditingId] = useState<string | null>(null)
   const { menu, openMenu, closeMenu } = useContextMenu()
   const isTouch = useIsTouch()
@@ -109,7 +112,7 @@ export function EditorCanvas() {
     )
   }
 
-  function renderTools({ view: v, toMm }: PanZoomContextValue) {
+  function renderTools({ view: v, toMm, pxToMm }: PanZoomContextValue) {
     // --- context-menu builders (shared by right-click and touch long-press) ---
     function shapeMenuItems(tool: ToolTrace, localPoint?: Point): MenuItem[] {
       if (editingId === tool.id) {
@@ -196,13 +199,29 @@ export function EditorCanvas() {
       beginTransient() // one undo entry per drag gesture
       const start = toMm(e)
       const orig = { ...tool.position }
-      const endDrag = () => setDragging(false)
+      const endDrag = () => {
+        setDragging(false)
+        setGuides([])
+      }
+      // ~8 screen px, clamped to a sane minimum so dense zoom-ins still snap.
+      const thresholdMm = Math.max(pxToMm(8), 0.25)
       startPointerGesture(e, {
         onMove: (ev) => {
           const p = toMm(ev)
-          updateToolTransient(tool.id, {
-            position: { x: snap(orig.x + p.x - start.x), y: snap(orig.y + p.y - start.y) },
-          })
+          // Grid snap is the fallback baseline.
+          let x = snap(orig.x + p.x - start.x)
+          let y = snap(orig.y + p.y - start.y)
+          // Alignment snap (other tools' bbox edges/centers + tray edges/center
+          // lines) wins over grid snap when a candidate is within threshold.
+          const draggedBBox = bboxOf(toolPoints({ ...tool, position: { x, y } }))
+          const otherBBoxes = tools.filter((t) => t.id !== tool.id).map((t) => bboxOf(toolPoints(t)))
+          const alignment = computeAlignmentSnap(draggedBBox, otherBBoxes, trayW, trayH, thresholdMm)
+          if (alignment) {
+            x += alignment.dx
+            y += alignment.dy
+          }
+          setGuides(alignment?.guides ?? [])
+          updateToolTransient(tool.id, { position: { x, y } })
         },
         onUp: endDrag,
         onAbort: endDrag,
@@ -353,6 +372,16 @@ export function EditorCanvas() {
             </g>
           )
         })}
+
+        {/* Alignment guides while dragging */}
+        {dragging &&
+          guides.map((g, i) =>
+            g.axis === 'x' ? (
+              <line key={i} x1={g.posMm} y1={g.fromMm} x2={g.posMm} y2={g.toMm} className={snapGuide} strokeWidth={0.4} />
+            ) : (
+              <line key={i} x1={g.fromMm} y1={g.posMm} x2={g.toMm} y2={g.posMm} className={snapGuide} strokeWidth={0.4} />
+            ),
+          )}
       </>
     )
   }
