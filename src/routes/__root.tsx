@@ -55,7 +55,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       <head>
         <HeadContent />
       </head>
-      <body className={css({ display: 'flex', flexDir: 'column', minH: '[100dvh]' })}>
+      <body className={css({ display: 'flex', flexDir: 'column', h: '[100dvh]' })}>
         <header
           className={css({
             display: 'flex',
