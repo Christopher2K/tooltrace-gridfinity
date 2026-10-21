@@ -17,7 +17,7 @@ export const Route = createFileRoute('/api/convert-heic')({
         try {
           const { convertHeicToJpeg } = await import('~/lib/heic-server')
           const jpeg = await convertHeicToJpeg(body)
-          return new Response(jpeg, {
+          return new Response(new Uint8Array(jpeg), {
             headers: {
               'Content-Type': 'image/jpeg',
               'Cache-Control': 'no-store',
