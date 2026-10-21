@@ -30,20 +30,24 @@ export const numberInput = defineSlotRecipe({
     root: {
       isolation: 'isolate',
       position: 'relative',
+      w: 'full',
       _disabled: {
         layerStyle: 'disabled',
       },
     },
     control: {
       borderStartWidth: '1px',
+      // Anchor to the root's bottom edge and size to the input height — the root
+      // also contains the label, so `top: 0; height: 100%` would stretch the
+      // steppers past the input (over the label and below the input's border).
+      bottom: '0',
       display: 'flex',
       divideY: '1px',
       flexDirection: 'column',
-      height: 'calc(100% - 2px)',
+      height: 'calc(var(--input-height) - 2px)',
       insetEnd: '0px',
       margin: '1px',
       position: 'absolute',
-      top: '0',
       width: 'var(--stepper-width)',
       zIndex: '1',
     },
@@ -72,24 +76,38 @@ export const numberInput = defineSlotRecipe({
   variants: {
     size: {
       sm: {
+        // Mirror the input's --input-height on the root so the control slot
+        // (a child of the root) can size itself to the input, not the root.
+        root: {
+          '--input-height': 'sizes.9',
+        },
         control: {
           '--stepper-width': 'sizes.4.5',
         },
         input: input.variants.size.sm,
       },
       md: {
+        root: {
+          '--input-height': 'sizes.10',
+        },
         control: {
           '--stepper-width': 'sizes.5',
         },
         input: input.variants.size.md,
       },
       lg: {
+        root: {
+          '--input-height': 'sizes.11',
+        },
         control: {
           '--stepper-width': 'sizes.5.5',
         },
         input: input.variants.size.lg,
       },
       xl: {
+        root: {
+          '--input-height': 'sizes.12',
+        },
         control: {
           '--stepper-width': 'sizes.6',
         },

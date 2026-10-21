@@ -365,7 +365,14 @@ export function PanZoomCanvas(props: PanZoomCanvasProps) {
           <IconButton size={controlSize} variant="plain" aria-label="Zoom in" onClick={() => zoomBy(0.8)}>
             +
           </IconButton>
-          <Button size={controlSize} variant="outline" onClick={zoomToFit}>
+          <Button
+            size={controlSize}
+            variant="outline"
+            onClick={zoomToFit}
+            // Redundant with the zoom-% button; hidden on narrow canvases where
+            // the control bar would otherwise overflow the container.
+            className={css({ display: { base: 'none', sm: 'inline-flex' } })}
+          >
             Fit
           </Button>
         </div>
