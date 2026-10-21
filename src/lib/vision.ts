@@ -246,7 +246,7 @@ function drawToGray(img: ImageBitmap, width: number): { data: Uint8Array; width:
 }
 
 /** Otsu's method — returns the threshold that best separates two brightness classes. */
-function otsuThreshold(data: Uint8Array): number {
+export function otsuThreshold(data: Uint8Array): number {
   const hist = new Array<number>(256).fill(0)
   for (let i = 0; i < data.length; i++) hist[data[i]]++
   const total = data.length
@@ -320,7 +320,7 @@ function labelComponents(mask: Uint8Array, width: number, height: number): { lab
 }
 
 /** Solves the 8x8 DLT system for a homography mapping src quad → dst quad. */
-function homography(src: Point[], dst: Point[]): number[] {
+export function homography(src: Point[], dst: Point[]): number[] {
   // Build A h = b
   const A: number[][] = []
   const b: number[] = []
@@ -356,7 +356,7 @@ function homography(src: Point[], dst: Point[]): number[] {
   return [...h, 1]
 }
 
-function applyH(h: number[], x: number, y: number): Point {
+export function applyH(h: number[], x: number, y: number): Point {
   const d = h[6] * x + h[7] * y + h[8]
   return { x: (h[0] * x + h[1] * y + h[2]) / d, y: (h[3] * x + h[4] * y + h[5]) / d }
 }
@@ -455,7 +455,7 @@ function traceContour(labels: Int32Array, width: number, height: number, label: 
 }
 
 /** Ramer–Douglas–Peucker polygon simplification. */
-function simplify(points: Point[], epsilon: number): Point[] {
+export function simplify(points: Point[], epsilon: number): Point[] {
   if (points.length < 3) return points
   const first = points[0]
   const last = points[points.length - 1]

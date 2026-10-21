@@ -12,11 +12,27 @@ export class MeshBuilder {
   triangles: Triangle[] = []
 
   /**
+   * Snaps to a 1 µm grid: independently computed profiles (e.g. corner-arc trig
+   * vs. block chamfers) drift by ~1e-4 mm, which would otherwise leave
+   * microscopic cracks in the STL. Welding by construction keeps the mesh watertight.
+   */
+  private static snap(v: Vec3): Vec3 {
+    return {
+      x: Math.round(v.x * 1000) / 1000,
+      y: Math.round(v.y * 1000) / 1000,
+      z: Math.round(v.z * 1000) / 1000,
+    }
+  }
+
+  /**
    * Adds a triangle, fixing winding so the geometric normal points along
    * `normalHint` (keeps the mesh consistently outward-facing regardless of
    * input polygon winding).
    */
-  tri(a: Vec3, b: Vec3, c: Vec3, normalHint: Vec3) {
+  tri(a0: Vec3, b0: Vec3, c0: Vec3, normalHint: Vec3) {
+    const a = MeshBuilder.snap(a0)
+    const b = MeshBuilder.snap(b0)
+    const c = MeshBuilder.snap(c0)
     const ab = { x: b.x - a.x, y: b.y - a.y, z: b.z - a.z }
     const ac = { x: c.x - a.x, y: c.y - a.y, z: c.z - a.z }
     const n = {

@@ -188,10 +188,6 @@ function rimProfile(d: number, inset: number, ux: number, uy: number, seg = 6): 
   const BL = { x: C + GF.CORNER_R, y: uy * GF.PITCH - C - GF.CORNER_R }
 
   const pts: Point[] = []
-  // earcut drops collinear vertices, which would T-junction faces against the
-  // segmented lofts — so groove points get a sub-micron perpendicular jitter.
-  const J = 0.0002
-  const j = (k: number) => (k % 2 === 0 ? J : -J)
   const arc = (c: Point, a0: number) => {
     for (let i = 0; i <= seg; i++) {
       const a = a0 + (i / seg) * (Math.PI / 2)
@@ -200,16 +196,16 @@ function rimProfile(d: number, inset: number, ux: number, uy: number, seg = 6): 
   }
   arc(TR, -Math.PI / 2)
   // right side, top → bottom
-  for (let k = 1; k < uy; k++) pts.push({ x: x1 + j(k), y: k * GF.PITCH - G }, { x: x1 + j(k), y: k * GF.PITCH + G })
+  for (let k = 1; k < uy; k++) pts.push({ x: x1, y: k * GF.PITCH - G }, { x: x1, y: k * GF.PITCH + G })
   arc(BR, 0)
   // bottom side, right → left
-  for (let k = ux - 1; k >= 1; k--) pts.push({ x: k * GF.PITCH + G, y: y1 + j(k) }, { x: k * GF.PITCH - G, y: y1 + j(k) })
+  for (let k = ux - 1; k >= 1; k--) pts.push({ x: k * GF.PITCH + G, y: y1 }, { x: k * GF.PITCH - G, y: y1 })
   arc(BL, Math.PI / 2)
   // left side, bottom → top
-  for (let k = uy - 1; k >= 1; k--) pts.push({ x: x0 + j(k), y: k * GF.PITCH + G }, { x: x0 + j(k), y: k * GF.PITCH - G })
+  for (let k = uy - 1; k >= 1; k--) pts.push({ x: x0, y: k * GF.PITCH + G }, { x: x0, y: k * GF.PITCH - G })
   arc(TL, Math.PI)
   // top side, left → right
-  for (let k = 1; k < ux; k++) pts.push({ x: k * GF.PITCH - G, y: y0 + j(k) }, { x: k * GF.PITCH + G, y: y0 + j(k) })
+  for (let k = 1; k < ux; k++) pts.push({ x: k * GF.PITCH - G, y: y0 }, { x: k * GF.PITCH + G, y: y0 })
   return pts
 }
 
