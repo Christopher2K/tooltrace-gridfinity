@@ -1,12 +1,13 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { Camera, Crosshair, FileDown, RotateCcw } from 'lucide-react'
+import { ArrowRight, Camera, Check, Crosshair, FileDown, ImagePlus, Lock, RotateCcw } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { css } from '~/styled-system/css'
-import { Button, Card, FileUpload, Heading, Slider, Spinner, Switch, Text } from '~/components/ui'
+import { css, cx } from '~/styled-system/css'
+import { Button, Card, FileUpload, Slider, Spinner, Switch } from '~/components/ui'
 import { downloadPdf, type PaperSize } from '~/lib/pdf'
 import { generateTemplatePdf } from '~/lib/template'
 import { convertIfHeic } from '~/lib/heic'
 import { detectInScan, getTemplatePaperSize, prepareScan, setTemplatePaperSize, type PreparedScan, type QuadSource } from '~/lib/vision'
+import { bboxOf } from '~/lib/geometry'
 import type { Point, ToolTrace } from '~/stores/editor'
 import { useEditorStore } from '~/stores/editor'
 
@@ -14,12 +15,48 @@ export const Route = createFileRoute('/new')({
   component: NewTrace,
 })
 
-const overlayPoly = css({ fill: 'grass.a3', stroke: 'grass.9' })
+const overlayPoly = css({ fill: 'grass.a3', stroke: 'grass.11' })
 
-const quadSourceLabel: Record<QuadSource, string> = {
-  markers: 'Calibrated via printed markers ✓',
-  paper: 'Calibrated via paper edges (markers not found)',
-  manual: 'Calibrated via manually picked corners',
+const overline = css({ textStyle: 'overline', color: 'grass.11', fontSize: { base: '10px', sm: '11px' } })
+const h1 = css({
+  textStyle: 'h1',
+  fontSize: { base: '24px', sm: '28px' },
+  lineHeight: { base: '31px', sm: '36px' },
+})
+
+/** Small download chip for the reference-sheet templates. */
+function TemplateChip({ paper, label, onClick }: { paper: PaperSize; label: string; onClick: (p: PaperSize) => void }) {
+  return (
+    <button
+      onClick={() => onClick(paper)}
+      className={css({
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '1',
+        h: '[25px]',
+        px: '2',
+        borderRadius: 'l2',
+        borderWidth: '1px',
+        borderColor: 'border',
+        bg: 'bg.surface',
+        fontSize: '12px',
+        lineHeight: '15px',
+        fontWeight: 'medium',
+        color: 'fg.default',
+        cursor: 'pointer',
+        _hover: { bg: 'gray.a2' },
+      })}
+    >
+      <FileDown size={12} className={css({ color: 'grass.11' })} />
+      {label}
+    </button>
+  )
+}
+
+const quadSourceBadge: Record<QuadSource, string> = {
+  markers: 'CALIBRATED VIA MARKERS',
+  paper: 'CALIBRATED VIA PAPER EDGES',
+  manual: 'CALIBRATED VIA MANUAL CORNERS',
 }
 
 /** Order 4 clicked points as TL, TR, BR, BL using the sum/diff trick. */
@@ -148,25 +185,42 @@ function NewTrace() {
   }
 
   const mmPerPx = scan?.mmPerPx ?? 1
+  const paperLabel = getTemplatePaperSize() === 'a4' ? 'A4' : 'LETTER'
 
   return (
-    <div className={css({ display: 'flex', flexDir: 'column', gap: '6', maxW: '3xl', mx: 'auto', w: 'full', py: { base: '4', sm: '8' } })}>
-      <Heading textStyle={{ base: '2xl', sm: '3xl' }}>New trace</Heading>
-
+    <div
+      className={css({
+        display: 'flex',
+        flexDir: 'column',
+        flex: '1',
+        minH: '0',
+        overflowY: 'auto',
+        // Bleed past the main padding; the flow centers its own column.
+        m: { base: '-3', sm: '-4' },
+        p: { base: '5', sm: '6', lg: '12' },
+      })}
+    >
+      {/* ============ Upload state ============ */}
       {!scan && !manual && (
-        <>
-          <Text color="fg.muted">
-            Place your tools on a white A4/Letter sheet (darker desk underneath), take a top-down
-            photo, and upload it. The app will rectify the image, calibrate scale, and detect tool
-            outlines.
-          </Text>
+        <div className={css({ display: 'flex', flexDir: 'column', gap: '6', maxW: '[720px]', mx: 'auto', w: 'full' })}>
+          <div className={css({ display: 'flex', flexDir: 'column', gap: '2' })}>
+            <span className={overline}>STEP 01 · CAPTURE</span>
+            <h1 className={h1}>New trace</h1>
+            <p className={css({ textStyle: 'body', color: 'fg.muted', display: { base: 'none', sm: 'block' } })}>
+              Place your tools on a white A4/Letter sheet with a darker desk underneath, take a
+              top-down photo, and upload it.
+            </p>
+            <p className={css({ textStyle: 'body-sm', color: 'fg.muted', display: { base: 'block', sm: 'none' } })}>
+              Tools on a white sheet, darker desk underneath, photo straight from above.
+            </p>
+          </div>
 
           <Card.Root>
             <Card.Header>
               <Card.Title>Upload photo</Card.Title>
-              <Card.Description>JPG, PNG or HEIC, taken straight from above</Card.Description>
+              <Card.Description>JPG or PNG, taken straight from above</Card.Description>
             </Card.Header>
-            <Card.Body className={css({ display: 'flex', flexDir: 'column', gap: '3' })}>
+            <Card.Body>
               <FileUpload.Root
                 maxFiles={1}
                 accept={['image/jpeg', 'image/png', 'image/heic', 'image/heif']}
@@ -175,17 +229,63 @@ function NewTrace() {
                   if (file) runDetection(file)
                 }}
               >
-                <FileUpload.Dropzone className={css({ cursor: 'pointer', minH: { base: '32', sm: 'auto' } })}>
-                  <div className={css({ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '2', color: 'fg.muted' })}>
-                    {processing && <Spinner size="sm" />}
-                    <Text color="fg.muted">
-                      {processing
-                        ? converting
-                          ? 'Converting HEIC photo…'
-                          : 'Detecting tools…'
-                        : 'Drag & drop your photo here, or click to browse'}
-                    </Text>
-                  </div>
+                <FileUpload.Dropzone className={css({ cursor: 'pointer' })}>
+                  {processing ? (
+                    <div className={css({ display: 'flex', alignItems: 'center', gap: '2', color: 'fg.muted' })}>
+                      <Spinner size="sm" />
+                      <span className={css({ textStyle: 'body', color: 'fg.muted' })}>
+                        {converting ? 'Converting HEIC photo…' : 'Detecting tools…'}
+                      </span>
+                    </div>
+                  ) : (
+                    <>
+                      <ImagePlus size={24} className={css({ color: 'grass.11' })} />
+                      <span
+                        className={css({
+                          textStyle: 'body',
+                          fontWeight: 'medium',
+                          color: 'fg.default',
+                          display: { base: 'none', sm: 'block' },
+                        })}
+                      >
+                        Drag & drop your photo here, or click to browse
+                      </span>
+                      <span
+                        className={css({
+                          textStyle: 'body',
+                          fontWeight: 'medium',
+                          color: 'fg.default',
+                          display: { base: 'block', sm: 'none' },
+                        })}
+                      >
+                        Tap to browse photos
+                      </span>
+                      <span
+                        className={css({
+                          fontFamily: 'mono',
+                          fontSize: '10px',
+                          lineHeight: '13px',
+                          letterSpacing: '0.08em',
+                          color: 'fg.subtle',
+                          display: { base: 'none', sm: 'block' },
+                        })}
+                      >
+                        JPG / PNG · TOP-DOWN · WHITE SHEET ON DARK DESK
+                      </span>
+                      <span
+                        className={css({
+                          fontFamily: 'mono',
+                          fontSize: '10px',
+                          lineHeight: '13px',
+                          letterSpacing: '0.08em',
+                          color: 'fg.subtle',
+                          display: { base: 'block', sm: 'none' },
+                        })}
+                      >
+                        JPG / PNG · TOP-DOWN
+                      </span>
+                    </>
+                  )}
                 </FileUpload.Dropzone>
                 <FileUpload.ItemGroup>
                   <FileUpload.Context>
@@ -203,128 +303,220 @@ function NewTrace() {
                 </FileUpload.ItemGroup>
                 <FileUpload.HiddenInput />
               </FileUpload.Root>
+            </Card.Body>
+          </Card.Root>
 
-              {/* Mobile-first path: straight to the camera. On desktop this opens a file picker. */}
-              <Button variant="outline" disabled={processing} onClick={() => cameraRef.current?.click()}>
-                <Camera size={16} /> Take photo
-              </Button>
-              <input
-                ref={cameraRef}
-                type="file"
-                name="camera-capture"
-                accept="image/*"
-                capture="environment"
-                className={css({ display: 'none' })}
-                onChange={(e) => {
-                  const file = e.target.files?.[0]
-                  e.target.value = ''
-                  if (file) runDetection(file)
-                }}
-              />
+          <div
+            className={css({
+              display: 'flex',
+              flexDir: { base: 'column', sm: 'row' },
+              justifyContent: 'space-between',
+              alignItems: { base: 'stretch', sm: 'center' },
+              gap: '3',
+              flexWrap: 'wrap',
+            })}
+          >
+            {/* Mobile-first path: straight to the camera. On desktop this opens a file picker. */}
+            <Button
+              variant="outline"
+              disabled={processing}
+              onClick={() => cameraRef.current?.click()}
+              className={css({ h: { base: '11', sm: '9' } })}
+            >
+              <Camera size={16} /> Take photo
+            </Button>
+            <input
+              ref={cameraRef}
+              type="file"
+              name="camera-capture"
+              accept="image/*"
+              capture="environment"
+              className={css({ display: 'none' })}
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                e.target.value = ''
+                if (file) runDetection(file)
+              }}
+            />
+            <div className={css({ display: 'flex', alignItems: 'center', gap: '2', flexWrap: 'wrap' })}>
+              <span
+                className={css({
+                  fontFamily: 'mono',
+                  fontSize: '10px',
+                  lineHeight: '13px',
+                  letterSpacing: '0.08em',
+                  color: 'fg.subtle',
+                })}
+              >
+                REFERENCE SHEET
+              </span>
+              <TemplateChip paper="a4" label="A4 PDF" onClick={downloadTemplate} />
+              <TemplateChip paper="letter" label="Letter PDF" onClick={downloadTemplate} />
+            </div>
+          </div>
 
-              <div className={css({ display: 'flex', gap: '2', flexWrap: 'wrap', alignItems: 'center' })}>
-                <Text textStyle="xs" color="fg.subtle">
-                  Best results with the reference sheet:
-                </Text>
-                <Button size="xs" variant="plain" onClick={() => downloadTemplate('a4')}>
-                  <FileDown size={14} /> A4 PDF
+          <div className={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+            <Lock size={12} className={css({ color: 'fg.subtle', flexShrink: '0' })} />
+            <span className={css({ fontSize: '12px', lineHeight: '15px', color: 'fg.subtle', display: { base: 'none', sm: 'block' } })}>
+              Detection runs locally in your browser — no photo is uploaded anywhere.
+            </span>
+            <span className={css({ fontSize: '12px', lineHeight: '15px', color: 'fg.subtle', display: { base: 'block', sm: 'none' } })}>
+              No photo leaves your device.
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* ============ Manual corner picking ============ */}
+      {manual && (
+        <div className={css({ maxW: '[720px]', mx: 'auto', w: 'full' })}>
+          <Card.Root>
+            <Card.Header>
+              <Card.Title>Pick the 4 paper corners</Card.Title>
+              <Card.Description>
+                Tap the corners of the sheet in any order — {manual.points.length}/4 placed
+              </Card.Description>
+            </Card.Header>
+            <Card.Body>
+              <div className={css({ position: 'relative', borderWidth: '1px', borderColor: 'border', borderRadius: 'l3', overflow: 'hidden' })}>
+                <img
+                  src={manual.url}
+                  alt="Uploaded photo — tap the four paper corners"
+                  onClick={onPickPoint}
+                  onLoad={(e) =>
+                    setManualImgSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })
+                  }
+                  className={css({ display: 'block', w: 'full', h: 'auto', cursor: 'crosshair' })}
+                />
+                {manualImgSize &&
+                  manual.points.map((p, idx) => (
+                    <span
+                      key={idx}
+                      className={css({
+                        position: 'absolute',
+                        w: '6',
+                        h: '6',
+                        borderRadius: 'full',
+                        bg: 'grass.9',
+                        color: 'white',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        textStyle: 'mono-sm',
+                        transform: 'translate(-50%, -50%)',
+                        pointerEvents: 'none',
+                      })}
+                      style={{
+                        left: `${(p.x / manualImgSize.w) * 100}%`,
+                        top: `${(p.y / manualImgSize.h) * 100}%`,
+                      }}
+                    >
+                      {idx + 1}
+                    </span>
+                  ))}
+              </div>
+              <div className={css({ display: 'flex', gap: '2', flexWrap: 'wrap' })}>
+                <Button
+                  size="sm"
+                  onClick={() => runDetection(manual.file, orderCorners(manual.points))}
+                  disabled={manual.points.length !== 4 || processing}
+                >
+                  <Crosshair size={14} /> {processing ? 'Detecting…' : 'Detect with these corners'}
                 </Button>
-                <Button size="xs" variant="plain" onClick={() => downloadTemplate('letter')}>
-                  <FileDown size={14} /> Letter PDF
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setManual({ ...manual, points: manual.points.slice(0, -1) })}
+                  disabled={manual.points.length === 0}
+                >
+                  Undo point
+                </Button>
+                <Button size="sm" variant="plain" onClick={() => setManual(null)}>
+                  Cancel
                 </Button>
               </div>
             </Card.Body>
           </Card.Root>
-        </>
+        </div>
       )}
 
-      {manual && (
-        <Card.Root>
-          <Card.Header>
-            <Card.Title>Pick the 4 paper corners</Card.Title>
-            <Card.Description>
-              Tap the corners of the sheet in any order — {manual.points.length}/4 placed
-            </Card.Description>
-          </Card.Header>
-          <Card.Body className={css({ display: 'flex', flexDir: 'column', gap: '3' })}>
-            <div className={css({ position: 'relative', borderWidth: '1px', borderColor: 'border', borderRadius: 'l2', overflow: 'hidden' })}>
-              <img
-                src={manual.url}
-                alt="Uploaded photo — tap the four paper corners"
-                onClick={onPickPoint}
-                onLoad={(e) =>
-                  setManualImgSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })
-                }
-                className={css({ display: 'block', w: 'full', h: 'auto', cursor: 'crosshair' })}
-              />
-              {manualImgSize &&
-                manual.points.map((p, idx) => (
-                  <span
-                    key={idx}
-                    className={css({
-                      position: 'absolute',
-                      w: '6',
-                      h: '6',
-                      borderRadius: 'full',
-                      bg: 'grass.9',
-                      color: 'white',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      textStyle: 'xs',
-                      transform: 'translate(-50%, -50%)',
-                      pointerEvents: 'none',
-                    })}
-                    style={{
-                      left: `${(p.x / manualImgSize.w) * 100}%`,
-                      top: `${(p.y / manualImgSize.h) * 100}%`,
-                    }}
-                  >
-                    {idx + 1}
-                  </span>
-                ))}
-            </div>
-            <div className={css({ display: 'flex', gap: '2', flexWrap: 'wrap' })}>
-              <Button
-                size="sm"
-                onClick={() => runDetection(manual.file, orderCorners(manual.points))}
-                disabled={manual.points.length !== 4 || processing}
-              >
-                <Crosshair size={14} /> {processing ? 'Detecting…' : 'Detect with these corners'}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setManual({ ...manual, points: manual.points.slice(0, -1) })}
-                disabled={manual.points.length === 0}
-              >
-                Undo point
-              </Button>
-              <Button size="sm" variant="plain" onClick={() => setManual(null)}>
-                Cancel
-              </Button>
-            </div>
-          </Card.Body>
-        </Card.Root>
-      )}
-
+      {/* ============ Detection review ============ */}
       {scan && (
-        <>
-          <Card.Root>
-            <Card.Header>
-              <Card.Title>Detected tools: {detected.length}</Card.Title>
-              <Card.Description>
-                {quadSourceLabel[scan.quadSource]} · {scan.paperSizeMm.width} × {scan.paperSizeMm.height} mm —
-                adjust sensitivity until every tool is outlined, then continue to the editor.
-              </Card.Description>
-            </Card.Header>
-            <Card.Body className={css({ display: 'flex', flexDir: 'column', gap: '4' })}>
-              {/* Rectified scan with detected outlines overlayed */}
-              <div className={css({ position: 'relative', borderWidth: '1px', borderColor: 'border', borderRadius: 'l2', overflow: 'hidden' })}>
+        <div className={css({ display: 'flex', flexDir: 'column', gap: { base: '4', lg: '5' }, w: 'full', maxW: '[1320px]', mx: 'auto' })}>
+          {/* Title row + calibration badge */}
+          <div className={css({ display: 'flex', flexDir: 'column', gap: '2' })}>
+            <span className={overline}>STEP 02 · DETECTION</span>
+            <div className={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '3', flexWrap: 'wrap' })}>
+              <h1 className={cx(h1, css({ fontSize: { base: '22px', sm: '28px' }, lineHeight: { base: '28px', sm: '36px' } }))}>
+                Review detection
+              </h1>
+              {/* Compact badge (mobile) */}
+              <span
+                className={css({
+                  display: { base: 'inline-flex', lg: 'none' },
+                  alignItems: 'center',
+                  gap: '1',
+                  px: '2',
+                  h: '5',
+                  borderRadius: 'l2',
+                  bg: 'grass.3',
+                  borderWidth: '1px',
+                  borderColor: 'grass.7',
+                  fontFamily: 'mono',
+                  fontSize: '9px',
+                  letterSpacing: '0.08em',
+                  color: 'grass.11',
+                })}
+              >
+                <Check size={11} /> {paperLabel} CALIBRATED
+              </span>
+              {/* Full badge (desktop) */}
+              <span
+                className={css({
+                  display: { base: 'none', lg: 'inline-flex' },
+                  alignItems: 'center',
+                  gap: '1.5',
+                  px: '2.5',
+                  h: '[23px]',
+                  borderRadius: 'l2',
+                  bg: 'grass.3',
+                  borderWidth: '1px',
+                  borderColor: 'grass.7',
+                  fontFamily: 'mono',
+                  fontSize: '10px',
+                  letterSpacing: '0.08em',
+                  color: 'grass.11',
+                })}
+              >
+                <Check size={12} /> {quadSourceBadge[scan.quadSource]} · {paperLabel} ·{' '}
+                {Math.round(scan.paperSizeMm.width)} × {Math.round(scan.paperSizeMm.height)} MM
+              </span>
+            </div>
+          </div>
+
+          <div className={css({ display: 'flex', flexDir: { base: 'column', lg: 'row' }, gap: { base: '4', lg: '6' }, alignItems: 'stretch' })}>
+            {/* Scan view */}
+            <div
+              className={css({
+                position: 'relative',
+                flex: '1',
+                minW: '0',
+                bg: 'canvas.bg',
+                borderRadius: 'l3',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                p: { base: '2', sm: '6' },
+                h: { base: '[264px]', lg: 'auto' },
+                minH: { lg: '[480px]' },
+                overflow: 'hidden',
+              })}
+            >
+              <div className={css({ position: 'relative', h: 'full', maxW: 'full' })}>
                 <img
                   src={showMask && maskUrl ? maskUrl : scan.rectifiedImageUrl}
                   alt="Rectified scan with detected tool outlines"
-                  className={css({ display: 'block', w: 'full', h: 'auto' })}
+                  className={css({ display: 'block', h: 'full', w: 'auto', maxW: 'full', objectFit: 'contain' })}
                 />
                 <svg
                   viewBox={`0 0 ${scan.width} ${scan.height}`}
@@ -341,93 +533,181 @@ function NewTrace() {
                     />
                   ))}
                 </svg>
+                {/* Numbered badges at each outline's top-left (percent coords) */}
+                {detected.map((tool, i) => {
+                  const b = bboxOf(tool.outline)
+                  const left = ((tool.position.x + b.x) / scan.paperSizeMm.width) * 100
+                  const top = ((tool.position.y + b.y) / scan.paperSizeMm.height) * 100
+                  return (
+                    <span
+                      key={tool.id}
+                      className={css({
+                        position: 'absolute',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        w: '[18px]',
+                        h: '[17px]',
+                        borderRadius: 'l1',
+                        bg: 'grass.9',
+                        color: 'fg.inverse',
+                        fontFamily: 'mono',
+                        fontSize: '10px',
+                        transform: 'translate(-35%, -65%)',
+                        pointerEvents: 'none',
+                      })}
+                      style={{ left: `${left}%`, top: `${top}%` }}
+                    >
+                      {i + 1}
+                    </span>
+                  )
+                })}
               </div>
-
-              <Slider.Root
-                value={[thresholdOffset]}
-                min={-40}
-                max={40}
-                step={1}
-                onValueChange={(d) => setThresholdOffset(d.value[0])}
+              {/* Scale pill */}
+              <span
+                className={css({
+                  position: 'absolute',
+                  left: '3',
+                  bottom: '3',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  px: '2.5',
+                  py: '1',
+                  borderRadius: 'l2',
+                  bg: 'bg.surface',
+                  borderWidth: '1px',
+                  borderColor: 'border.strong',
+                  fontFamily: 'mono',
+                  fontSize: '10px',
+                  lineHeight: '13px',
+                  color: 'fg.muted',
+                })}
               >
-                <div className={css({ display: 'flex', justifyContent: 'space-between' })}>
-                  <Slider.Label>Sensitivity</Slider.Label>
-                  <Slider.ValueText />
+                {mmPerPx.toFixed(3)} mm/px · RECTIFIED
+              </span>
+            </div>
+
+            {/* Control rail */}
+            <Card.Root className={css({ w: { lg: '[340px]' }, flexShrink: { lg: '0' } })}>
+              <Card.Header>
+                <Card.Title>Detection</Card.Title>
+                <Card.Description>Tune until every tool is outlined</Card.Description>
+              </Card.Header>
+              <Card.Body>
+                {/* Stat */}
+                <div
+                  className={css({
+                    display: 'flex',
+                    alignItems: 'baseline',
+                    gap: '2',
+                    pb: { lg: '3' },
+                    borderBottomWidth: { lg: '1px' },
+                    borderColor: 'border',
+                  })}
+                >
+                  <span
+                    className={css({
+                      fontFamily: 'mono',
+                      fontWeight: 'medium',
+                      fontSize: { base: '20px', lg: '32px' },
+                      lineHeight: { base: '26px', lg: '42px' },
+                      color: 'fg.default',
+                    })}
+                  >
+                    {detected.length}
+                  </span>
+                  <span className={css({ textStyle: 'body-sm', color: 'fg.muted' })}>tools detected</span>
                 </div>
-                <Slider.Control>
-                  <Slider.Track>
-                    <Slider.Range />
-                  </Slider.Track>
-                  <Slider.Thumb index={0} />
-                </Slider.Control>
-              </Slider.Root>
-              <Text textStyle="xs" color="fg.subtle">
-                Raise sensitivity to catch lighter tools, lower it if shadows or paper texture get
-                detected.
-              </Text>
 
-              <div className={css({ display: 'flex', gap: '6', flexWrap: 'wrap' })}>
-                {scan.quadSource === 'markers' && (
-                  <div className={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-                    <Text textStyle="sm" color="fg.muted">
-                      Printed sheet:
-                    </Text>
-                    {(['a4', 'letter'] as const).map((p) => (
-                      <Button
-                        key={p}
-                        size="xs"
-                        variant={getTemplatePaperSize() === p ? 'solid' : 'outline'}
-                        disabled={processing}
-                        onClick={() => changeTemplatePaper(p)}
-                      >
-                        {p === 'a4' ? 'A4' : 'Letter'}
-                      </Button>
-                    ))}
+                <Slider.Root
+                  value={[thresholdOffset]}
+                  min={-40}
+                  max={40}
+                  step={1}
+                  onValueChange={(d) => setThresholdOffset(d.value[0])}
+                >
+                  <div className={css({ display: 'flex', justifyContent: 'space-between' })}>
+                    <Slider.Label>Sensitivity</Slider.Label>
+                    <span className={css({ fontFamily: 'mono', fontSize: '12px', lineHeight: '16px', color: 'fg.muted' })}>
+                      {thresholdOffset > 0 ? `+${thresholdOffset}` : thresholdOffset}
+                    </span>
                   </div>
-                )}
-                <Switch.Root
-                  className={css({ display: 'flex', alignItems: 'center', gap: '2' })}
-                  checked={highDetail}
-                  onCheckedChange={(d) => setHighDetail(d.checked)}
-                >
-                  <Switch.Control />
-                  <Switch.Label>High detail outlines</Switch.Label>
-                  <Switch.HiddenInput />
-                </Switch.Root>
-                <Switch.Root
-                  className={css({ display: 'flex', alignItems: 'center', gap: '2' })}
-                  checked={showMask}
-                  onCheckedChange={(d) => setShowMask(d.checked)}
-                >
-                  <Switch.Control />
-                  <Switch.Label>Show detection mask</Switch.Label>
-                  <Switch.HiddenInput />
-                </Switch.Root>
-              </div>
+                  <Slider.Control>
+                    <Slider.Track>
+                      <Slider.Range />
+                    </Slider.Track>
+                    <Slider.Thumb index={0} />
+                  </Slider.Control>
+                </Slider.Root>
+                <p className={css({ fontSize: '12px', lineHeight: '17px', color: 'fg.subtle' })}>
+                  Raise sensitivity to catch lighter tools; lower it if shadows or paper texture get
+                  detected.
+                </p>
 
-              <div className={css({ display: 'flex', gap: '2', flexWrap: 'wrap' })}>
-                <Button onClick={openEditor} disabled={detected.length === 0}>
-                  Open editor with {detected.length} tool{detected.length === 1 ? '' : 's'}
-                </Button>
-                <Button variant="outline" onClick={reset}>
-                  <RotateCcw size={14} /> Try another photo
-                </Button>
-              </div>
-              {detected.length === 0 && (
-                <Text textStyle="sm" color="error">
-                  Nothing detected at this sensitivity — adjust the slider or retake the photo.
-                </Text>
-              )}
-            </Card.Body>
-          </Card.Root>
-        </>
+                <div className={css({ display: 'flex', flexDir: 'column', gap: '2.5' })}>
+                  <Switch.Root
+                    className={css({ display: 'flex', alignItems: 'center', gap: '2' })}
+                    checked={highDetail}
+                    onCheckedChange={(d) => setHighDetail(d.checked)}
+                  >
+                    <Switch.Control />
+                    <Switch.Label>High detail outlines</Switch.Label>
+                    <Switch.HiddenInput />
+                  </Switch.Root>
+                  <Switch.Root
+                    className={css({ display: 'flex', alignItems: 'center', gap: '2' })}
+                    checked={showMask}
+                    onCheckedChange={(d) => setShowMask(d.checked)}
+                  >
+                    <Switch.Control />
+                    <Switch.Label>Show detection mask</Switch.Label>
+                    <Switch.HiddenInput />
+                  </Switch.Root>
+                  {scan.quadSource === 'markers' && (
+                    <div className={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+                      <span className={css({ textStyle: 'body-sm', color: 'fg.muted' })}>Printed sheet:</span>
+                      {(['a4', 'letter'] as const).map((p) => (
+                        <Button
+                          key={p}
+                          size="xs"
+                          variant={getTemplatePaperSize() === p ? 'solid' : 'outline'}
+                          disabled={processing}
+                          onClick={() => changeTemplatePaper(p)}
+                        >
+                          {p === 'a4' ? 'A4' : 'Letter'}
+                        </Button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className={css({ display: 'flex', flexDir: 'column', gap: '2' })}>
+                  <Button
+                    colorPalette="grass"
+                    onClick={openEditor}
+                    disabled={detected.length === 0}
+                    className={css({ w: 'full', h: { base: '11', sm: '9' } })}
+                  >
+                    <ArrowRight size={16} /> Open editor with {detected.length} tool{detected.length === 1 ? '' : 's'}
+                  </Button>
+                  <Button variant="plain" onClick={reset} className={css({ w: 'full', color: 'fg.muted' })}>
+                    <RotateCcw size={16} /> Try another photo
+                  </Button>
+                  {detected.length === 0 && (
+                    <p className={css({ fontSize: '12px', lineHeight: '15px', color: 'error.fg' })}>
+                      Nothing detected at this sensitivity — adjust the slider or retake the photo.
+                    </p>
+                  )}
+                </div>
+              </Card.Body>
+            </Card.Root>
+          </div>
+        </div>
       )}
 
       {error && (
-        <div className={css({ display: 'flex', flexDir: 'column', gap: '2' })}>
-          <Text color="error" textStyle="sm">
-            {error}
-          </Text>
+        <div className={css({ display: 'flex', flexDir: 'column', gap: '2', maxW: '[720px]', mx: 'auto', w: 'full' })}>
+          <p className={css({ textStyle: 'body-sm', color: 'error.fg' })}>{error}</p>
           {lastFile && !manual && (
             <div>
               <Button size="sm" variant="outline" onClick={startManualPick}>
@@ -437,11 +717,6 @@ function NewTrace() {
           )}
         </div>
       )}
-
-      <Text textStyle="sm" color="fg.subtle">
-        Detection runs on this machine — JPEG/PNG never leave your browser; HEIC photos are
-        converted by this app's own server. No third-party services.
-      </Text>
     </div>
   )
 }

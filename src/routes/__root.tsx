@@ -1,7 +1,11 @@
 /// <reference types="vite/client" />
+import '@fontsource-variable/space-grotesk'
+import '@fontsource-variable/inter'
+import '@fontsource/ibm-plex-mono/400.css'
+import '@fontsource/ibm-plex-mono/500.css'
 import { HeadContent, Link, Scripts, createRootRoute, useNavigate } from '@tanstack/react-router'
 import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
-import { Menu as MenuIcon } from 'lucide-react'
+import { Menu as MenuIcon, Wrench } from 'lucide-react'
 import * as React from 'react'
 import { css } from '~/styled-system/css'
 import { DefaultCatchBoundary } from '~/components/DefaultCatchBoundary'
@@ -37,9 +41,12 @@ const navLink = css({
   px: '3',
   py: '1.5',
   borderRadius: 'l2',
+  fontSize: '13px',
+  lineHeight: '16px',
   fontWeight: 'medium',
   color: 'fg.muted',
-  _hover: { color: 'fg.default', bg: 'gray.a2' },
+  _hover: { color: 'fg.default' },
+  _currentPage: { color: 'fg.default', bg: 'bg.subtle' },
 })
 
 const NAV_ITEMS = [
@@ -60,26 +67,75 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           className={css({
             display: 'flex',
             alignItems: 'center',
-            gap: '2',
-            px: { base: '3', sm: '4' },
-            py: '3',
+            gap: '6',
+            px: { base: '4', sm: '6' },
+            h: { base: '13', sm: '14' },
+            flexShrink: '0',
+            bg: 'bg.surface',
             borderBottomWidth: '1px',
             borderColor: 'border',
           })}
         >
-          <span className={css({ fontWeight: 'bold', mr: '4' })}>🔧 Tooltrace</span>
+          <Link to="/" className={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+            <span
+              className={css({
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxSize: '6',
+                borderRadius: 'l2',
+                bg: 'grass.9',
+                color: 'fg.inverse',
+              })}
+            >
+              <Wrench size={14} />
+            </span>
+            <span
+              className={css({
+                fontFamily: 'display',
+                fontSize: '15px',
+                lineHeight: '20px',
+                fontWeight: 'semibold',
+                color: 'fg.default',
+              })}
+            >
+              Tooltrace
+            </span>
+          </Link>
           {/* Inline nav from `sm` up; hamburger menu below that. */}
           <nav className={css({ display: { base: 'none', sm: 'flex' }, gap: '1' })}>
-            <Link to="/" activeOptions={{ exact: true }} activeProps={{ className: css({ color: 'fg.default' }) }} className={navLink}>
-              Home
-            </Link>
-            <Link to="/new" activeProps={{ className: css({ color: 'fg.default' }) }} className={navLink}>
-              New Trace
-            </Link>
-            <Link to="/edit" activeProps={{ className: css({ color: 'fg.default' }) }} className={navLink}>
-              Editor
-            </Link>
+            {NAV_ITEMS.map((item) => (
+              <Link
+                key={item.to}
+                to={item.to}
+                activeOptions={item.to === '/' ? { exact: true } : undefined}
+                className={navLink}
+              >
+                {item.label}
+              </Link>
+            ))}
           </nav>
+          <div
+            className={css({
+              display: { base: 'none', sm: 'flex' },
+              alignItems: 'center',
+              gap: '2',
+              ml: 'auto',
+            })}
+          >
+            <span className={css({ boxSize: '1.5', borderRadius: 'full', bg: 'grass.9' })} />
+            <span
+              className={css({
+                fontFamily: 'mono',
+                fontSize: '10px',
+                lineHeight: '13px',
+                letterSpacing: '0.08em',
+                color: 'fg.subtle',
+              })}
+            >
+              LOCAL-ONLY · NO ACCOUNT
+            </span>
+          </div>
           <div className={css({ display: { base: 'block', sm: 'none' }, ml: 'auto' })}>
             <Menu.Root onSelect={(d) => navigate({ to: d.value as '/' | '/new' | '/edit' })}>
               <Menu.Trigger asChild>
