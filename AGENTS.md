@@ -41,7 +41,10 @@ milestones (M1–M4).
   no Tailwind classes, no other CSS-in-JS.
 - **Components:** use Park UI components from `~/components/ui` (e.g. `Button`, `Card`,
   `NumberInput`). If a component is missing, add it with the Park UI CLI rather than hand-rolling.
-- **Theme:** design tokens live in `src/theme` (Park UI colors: `grass` accent, `sand` gray, `red`).
+- **Theme:** design tokens live in `src/theme` (colors: `grass` accent for deliberate actions,
+  `slate` gray ramp, `amber` warnings, `red` errors; plus `canvas.*` editor-surface tokens).
+  Fonts are Space Grotesk Variable (display), Inter Variable (body), IBM Plex Mono (mono),
+  imported from `@fontsource*` in `src/routes/__root.tsx`; text styles in `src/theme/text-styles.ts`.
   After editing `panda.config.ts` or `src/theme`, run `pnpm codegen`.
 - **State:** shared client state goes in Zustand stores under `src/stores`. The editor store
   (`src/stores/editor.ts`) is the source of truth for tray config and tool traces; it persists to
