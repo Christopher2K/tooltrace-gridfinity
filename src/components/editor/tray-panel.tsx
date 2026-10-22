@@ -30,7 +30,7 @@ export function TrayPanel() {
           max={12}
           onValueChange={(d) => setTraySize(d.valueAsNumber || 1, tray.heightUnits)}
         >
-          <NumberInput.Label>Width (units)</NumberInput.Label>
+          <NumberInput.Label>Columns (42 mm units)</NumberInput.Label>
           <NumberInput.Control />
           <NumberInput.Input />
         </NumberInput.Root>
@@ -40,7 +40,7 @@ export function TrayPanel() {
           max={12}
           onValueChange={(d) => setTraySize(tray.widthUnits, d.valueAsNumber || 1)}
         >
-          <NumberInput.Label>Depth (units)</NumberInput.Label>
+          <NumberInput.Label>Rows (42 mm units)</NumberInput.Label>
           <NumberInput.Control />
           <NumberInput.Input />
         </NumberInput.Root>
