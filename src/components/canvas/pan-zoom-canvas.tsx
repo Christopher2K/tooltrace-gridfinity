@@ -10,25 +10,31 @@ const canvasCursor = css({ w: 'full', h: 'full', display: 'block', touchAction: 
 const canvasCursorDrag = css({ w: 'full', h: 'full', display: 'block', touchAction: 'none', cursor: 'grabbing' })
 const zoomControls = css({
   position: 'absolute',
-  bottom: '3',
+  top: '3',
   right: '3',
   display: 'flex',
   alignItems: 'center',
-  gap: '1',
-  bg: 'bg.default',
+  bg: 'bg.surface',
   borderWidth: '1px',
-  borderColor: 'border',
+  borderColor: 'border.strong',
   borderRadius: 'l2',
-  p: '1',
-  shadow: 'sm',
+  divideX: '1px',
+  divideColor: 'border',
+  overflow: 'hidden',
 })
 const zoomPct = css({
-  minW: '12',
+  minW: '[52px]',
   textAlign: 'center',
   cursor: 'pointer',
-  borderRadius: 'l1',
   px: '1',
-  py: '0.5',
+  h: '7',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  fontFamily: 'mono',
+  fontSize: '11px',
+  lineHeight: '14px',
+  color: 'fg.default',
   _hover: { bg: 'gray.a2' },
 })
 
@@ -69,10 +75,14 @@ export interface PanZoomCanvasProps {
   onBackgroundLongPress?: (worldPoint: Point, e: LongPressPoint, ctx: PanZoomContextValue) => void
   /** Fired whenever the view changes. */
   onViewChange?: (view: View) => void
+  /** Fired as the pointer moves over the canvas (mm coords), null on leave. */
+  onHoverMm?: (point: Point | null) => void
   /** Show the zoom control cluster (out / % / in / fit). Default true. */
   showZoomControls?: boolean
   /** Extra controls rendered at the start of the zoom cluster (e.g. undo/redo). */
   controlsSlot?: ReactNode
+  /** Extra absolutely-positioned overlays rendered inside the container (e.g. info pills). */
+  overlaySlot?: ReactNode
   /** Decides whether a pointer/contextmenu event target counts as background.
    *  Default: the SVG itself or any plain `rect` (e.g. a background sheet). */
   isBackgroundTarget?: (target: Element, currentTarget: Element) => boolean
@@ -119,8 +129,10 @@ export function PanZoomCanvas(props: PanZoomCanvasProps) {
     onBackgroundContextMenu,
     onBackgroundLongPress,
     onViewChange,
+    onHoverMm,
     showZoomControls = true,
     controlsSlot,
+    overlaySlot,
     isBackgroundTarget = defaultIsBackgroundTarget,
     className,
   } = props
@@ -135,6 +147,9 @@ export function PanZoomCanvas(props: PanZoomCanvasProps) {
   onViewChangeRef.current = onViewChange
   const onBackgroundLongPressRef = useRef(onBackgroundLongPress)
   onBackgroundLongPressRef.current = onBackgroundLongPress
+  const onHoverMmRef = useRef(onHoverMm)
+  onHoverMmRef.current = onHoverMm
+  const hoverRafRef = useRef(0)
 
   const v = view ?? computeFit()
 
@@ -367,7 +382,7 @@ export function PanZoomCanvas(props: PanZoomCanvasProps) {
           </IconButton>
           <Button
             size={controlSize}
-            variant="outline"
+            variant="plain"
             onClick={zoomToFit}
             // Redundant with the zoom-% button; hidden on narrow canvases where
             // the control bar would otherwise overflow the container.
@@ -383,9 +398,24 @@ export function PanZoomCanvas(props: PanZoomCanvasProps) {
         className={grabbing ? canvasCursorDrag : canvasCursor}
         onPointerDown={onBackgroundPointerDown}
         onContextMenu={handleContextMenu}
+        onPointerMove={
+          onHoverMm
+            ? (e) => {
+                // rAF-throttled hover coordinate reporting (mm space).
+                if (hoverRafRef.current) return
+                const { clientX, clientY } = e
+                hoverRafRef.current = requestAnimationFrame(() => {
+                  hoverRafRef.current = 0
+                  onHoverMmRef.current?.(toMm({ clientX, clientY }))
+                })
+              }
+            : undefined
+        }
+        onPointerLeave={onHoverMm ? () => onHoverMmRef.current?.(null) : undefined}
       >
         {typeof children === 'function' ? children(ctx) : children}
       </svg>
+      {overlaySlot}
     </div>
   )
 }

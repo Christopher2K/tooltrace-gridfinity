@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { EyeOff, Image as ImageIcon, ImageOff, Redo2, Shapes, Undo2 } from 'lucide-react'
-import { css } from '~/styled-system/css'
+import { css, cx } from '~/styled-system/css'
 import { IconButton } from '~/components/ui'
 import { bboxCenter, bboxOf, flattenOutline, insertVertex, nearestEdgeProjection, offsetPolygon, outlinePath, quadPoint, removeVertex, rotatePoint, setEdgeCurve, toolPoints } from '~/lib/geometry'
 import { computeAlignmentSnap, type SnapGuide } from '~/lib/snap'
@@ -15,26 +15,44 @@ const container = css({
   overflow: 'hidden',
   // Phones/tablets: fixed share of the viewport above the stacked panels.
   // Desktop: fill the grid row (the editor grid stretches to the main area).
-  h: { base: '[58dvh]', lg: 'full' },
-  minH: { base: '320px', lg: '0' },
-  bg: 'gray.a1',
+  h: { base: '[330px]', sm: '[50dvh]', lg: 'full' },
+  minH: { lg: '0' },
+  bg: 'canvas.bg',
 })
 const toolPoly = css({
-  fill: 'grass.a3',
-  stroke: 'grass.7',
+  fill: 'canvas.toolFill',
+  stroke: 'canvas.tool',
+  cursor: 'grab',
+  _hover: { fill: '[#1c202414]' },
+})
+const toolPolySelected = css({
+  fill: 'canvas.selectionFill',
+  stroke: 'canvas.selection',
   cursor: 'grab',
   _hover: { fill: 'grass.a4' },
 })
-const toolPolySelected = css({
-  fill: 'grass.a5',
-  stroke: 'grass.9',
-  cursor: 'grab',
-  _hover: { fill: 'grass.a6' },
-})
 const toleranceLine = css({ fill: 'none', stroke: 'grass.8', strokeDasharray: '2 2', pointerEvents: 'none' })
-const vertexHandle = css({ fill: 'bg.default', stroke: 'grass.9', cursor: 'move' })
-const midHandle = css({ fill: 'grass.a4', stroke: 'grass.8', cursor: 'copy' })
-const snapGuide = css({ stroke: 'grass.9', strokeDasharray: '1.5 1.5', pointerEvents: 'none' })
+const vertexHandle = css({ fill: 'bg.surface', stroke: 'canvas.selection', cursor: 'move' })
+const midHandle = css({ fill: 'bg.surface', stroke: 'canvas.selection', cursor: 'copy' })
+const snapGuide = css({ stroke: 'canvas.selection', strokeDasharray: '1.5 1.5', pointerEvents: 'none' })
+
+const overlayPill = css({
+  position: 'absolute',
+  display: 'inline-flex',
+  alignItems: 'center',
+  px: '2.5',
+  py: '1',
+  borderRadius: 'l2',
+  bg: 'bg.surface',
+  borderWidth: '1px',
+  borderColor: 'border.strong',
+  fontFamily: 'mono',
+  fontSize: '10px',
+  lineHeight: '13px',
+  letterSpacing: '0.04em',
+  color: 'fg.muted',
+  pointerEvents: 'none',
+})
 
 export function EditorCanvas() {
   const tools = useEditorStore((s) => s.tools)
@@ -65,6 +83,8 @@ export function EditorCanvas() {
   const [showOutlines, setShowOutlines] = useState(true)
   const { menu, openMenu, closeMenu } = useContextMenu()
   const isTouch = useIsTouch()
+  // Live pointer position over the canvas (mm), shown in the bottom-right pill.
+  const [hoverMm, setHoverMm] = useState<Point | null>(null)
 
   /** Bounds of tray + all tools, padded. */
   function computeFit(): View {
@@ -104,16 +124,35 @@ export function EditorCanvas() {
     return tool.rotationDeg ? rotatePoint(shifted, c, -tool.rotationDeg) : shifted
   }
 
-  const gridLines: React.ReactNode[] = []
-  for (let i = 1; i < tray.widthUnits; i++) {
-    gridLines.push(
-      <line key={`v${i}`} x1={i * GRID_UNIT_MM} y1={0} x2={i * GRID_UNIT_MM} y2={trayH} className={css({ stroke: 'gray.a4' })} strokeWidth={0.3} />,
-    )
-  }
-  for (let i = 1; i < tray.heightUnits; i++) {
-    gridLines.push(
-      <line key={`h${i}`} x1={0} y1={i * GRID_UNIT_MM} x2={trayW} y2={i * GRID_UNIT_MM} className={css({ stroke: 'gray.a4' })} strokeWidth={0.3} />,
-    )
+  /** Minor grid (10.5 mm) spanning the visible view + tray cell dividers (42 mm). */
+  function renderGrid(v: View, pxToMm: (px: number) => number): React.ReactNode {
+    const lines: React.ReactNode[] = []
+    const minor = GRID_UNIT_MM / 4
+    const thin = pxToMm(1)
+    const x0 = Math.floor(v.x / minor) * minor
+    const y0 = Math.floor(v.y / minor) * minor
+    for (let x = x0; x <= v.x + v.w; x += minor) {
+      lines.push(
+        <line key={`gv${x.toFixed(2)}`} x1={x} y1={v.y} x2={x} y2={v.y + v.h} className={css({ stroke: 'canvas.grid' })} strokeWidth={thin} />,
+      )
+    }
+    for (let y = y0; y <= v.y + v.h; y += minor) {
+      lines.push(
+        <line key={`gh${y.toFixed(2)}`} x1={v.x} y1={y} x2={v.x + v.w} y2={y} className={css({ stroke: 'canvas.grid' })} strokeWidth={thin} />,
+      )
+    }
+    // 42 mm cell dividers on the tray surface
+    for (let i = 1; i < tray.widthUnits; i++) {
+      lines.push(
+        <line key={`tv${i}`} x1={i * GRID_UNIT_MM} y1={0} x2={i * GRID_UNIT_MM} y2={trayH} className={css({ stroke: 'canvas.gridMajor' })} strokeWidth={thin} />,
+      )
+    }
+    for (let i = 1; i < tray.heightUnits; i++) {
+      lines.push(
+        <line key={`th${i}`} x1={0} y1={i * GRID_UNIT_MM} x2={trayW} y2={i * GRID_UNIT_MM} className={css({ stroke: 'canvas.gridMajor' })} strokeWidth={thin} />,
+      )
+    }
+    return lines
   }
 
   function renderTools({ view: v, toMm, pxToMm }: PanZoomContextValue) {
@@ -299,7 +338,7 @@ export function EditorCanvas() {
     return (
       <>
         {/* Tray */}
-        <rect x={0} y={0} width={trayW} height={trayH} className={css({ fill: 'gray.a2', stroke: 'gray.7' })} strokeWidth={0.5} />
+        <rect x={0} y={0} width={trayW} height={trayH} className={css({ fill: 'bg.surface', stroke: 'canvas.tray' })} strokeWidth={pxToMm(1.5)} />
 
         {/* Reference photo layer: the rectified scan, in sheet mm coordinates
             (tool positions are sheet mm, so it aligns exactly). Under the grid,
@@ -316,7 +355,7 @@ export function EditorCanvas() {
             className={css({ pointerEvents: 'none' })}
           />
         )}
-        {gridLines}
+        {renderGrid(v, pxToMm)}
 
         {/* Tools (selected/editing tools always render, even with outlines hidden) */}
         {tools
@@ -326,7 +365,9 @@ export function EditorCanvas() {
           const transform = `translate(${tool.position.x} ${tool.position.y}) rotate(${tool.rotationDeg} ${c.x} ${c.y})`
           const selected = tool.id === selectedToolId
           const editing = editingId === tool.id
-          const handleR = Math.max(v.w, v.h) * 0.006 * (isTouch ? 1.9 : 1)
+          // Screen-px-sized chrome: 9 px square handles (bigger on touch).
+          const handleSize = pxToMm(isTouch ? 16 : 9)
+          const midR = handleSize * 0.32
           return (
             <g key={tool.id} transform={transform}>
               {tool.toleranceMm > 0 && (
@@ -335,7 +376,7 @@ export function EditorCanvas() {
                     .map((p) => `${p.x},${p.y}`)
                     .join(' ')}
                   className={toleranceLine}
-                  strokeWidth={0.4}
+                  strokeWidth={pxToMm(1)}
                 />
               )}
               <path
@@ -348,7 +389,7 @@ export function EditorCanvas() {
                   setEditingId(editing ? null : tool.id)
                 }}
                 className={selected ? toolPolySelected : toolPoly}
-                strokeWidth={0.5}
+                strokeWidth={selected ? pxToMm(2) : pxToMm(1.5)}
                 strokeLinejoin="round"
               />
               {editing && (
@@ -366,9 +407,9 @@ export function EditorCanvas() {
                         key={`m${i}`}
                         cx={mid.x}
                         cy={mid.y}
-                        r={handleR * 0.75}
+                        r={midR}
                         className={midHandle}
-                        strokeWidth={0.4}
+                        strokeWidth={pxToMm(1.25)}
                         onPointerDown={(e) => onMidPointerDown(e, tool, i)}
                         onDoubleClick={(e) => onMidDoubleClick(e, tool, i)}
                         onContextMenu={(e) => onMidContextMenu(e, tool, i)}
@@ -377,13 +418,15 @@ export function EditorCanvas() {
                   })}
                   {/* Vertices: drag to move, double-click to delete */}
                   {tool.outline.map((p, i) => (
-                    <circle
+                    <rect
                       key={i}
-                      cx={p.x}
-                      cy={p.y}
-                      r={handleR}
+                      x={p.x - handleSize / 2}
+                      y={p.y - handleSize / 2}
+                      width={handleSize}
+                      height={handleSize}
+                      rx={pxToMm(1.5)}
                       className={vertexHandle}
-                      strokeWidth={0.4}
+                      strokeWidth={pxToMm(1.5)}
                       onPointerDown={(e) => onVertexPointerDown(e, tool, i)}
                       onDoubleClick={(e) => onVertexDoubleClick(e, tool, i)}
                       onContextMenu={(e) => onVertexContextMenu(e, tool, i)}
@@ -399,9 +442,9 @@ export function EditorCanvas() {
         {dragging &&
           guides.map((g, i) =>
             g.axis === 'x' ? (
-              <line key={i} x1={g.posMm} y1={g.fromMm} x2={g.posMm} y2={g.toMm} className={snapGuide} strokeWidth={0.4} />
+              <line key={i} x1={g.posMm} y1={g.fromMm} x2={g.posMm} y2={g.toMm} className={snapGuide} strokeWidth={pxToMm(1.5)} />
             ) : (
-              <line key={i} x1={g.fromMm} y1={g.posMm} x2={g.toMm} y2={g.posMm} className={snapGuide} strokeWidth={0.4} />
+              <line key={i} x1={g.fromMm} y1={g.posMm} x2={g.toMm} y2={g.posMm} className={snapGuide} strokeWidth={pxToMm(1.5)} />
             ),
           )}
       </>
@@ -414,6 +457,7 @@ export function EditorCanvas() {
         computeFit={computeFit}
         grabbing={dragging}
         className={container}
+        onHoverMm={isTouch ? undefined : (p) => setHoverMm(p)}
         onBackgroundClick={() => {
           selectTool(null)
           setEditingId(null)
@@ -424,6 +468,36 @@ export function EditorCanvas() {
         onBackgroundLongPress={(p, e, ctx) => {
           openMenu(longPressMenuEvent(e), backgroundMenuItems(p, ctx))
         }}
+        overlaySlot={
+          <>
+            {/* Tray info pill — top left */}
+            <span className={cx(overlayPill, css({ top: '3', left: '3' }))}>
+              TRAY {tray.widthUnits} × {tray.heightUnits} · {trayW} × {trayH} MM
+            </span>
+            {/* Snap/grid note — bottom left */}
+            <span
+              className={css({
+                position: 'absolute',
+                bottom: '3',
+                left: '3',
+                fontFamily: 'mono',
+                fontSize: '10px',
+                lineHeight: '13px',
+                letterSpacing: '0.04em',
+                color: 'fg.subtle',
+                pointerEvents: 'none',
+              })}
+            >
+              {snapMm > 0 ? `SNAP ${snapMm} MM` : 'SNAP OFF'} · GRID {GRID_UNIT_MM} MM
+            </span>
+            {/* Live pointer coordinates — bottom right (hidden on touch) */}
+            {hoverMm && (
+              <span className={cx(overlayPill, css({ bottom: '3', right: '3' }))}>
+                X {hoverMm.x.toFixed(1)} · Y {hoverMm.y.toFixed(1)}
+              </span>
+            )}
+          </>
+        }
         controlsSlot={
           <>
             <IconButton size="xs" variant="plain" aria-label="Undo" disabled={!canUndo} onClick={undo}>
@@ -432,7 +506,6 @@ export function EditorCanvas() {
             <IconButton size="xs" variant="plain" aria-label="Redo" disabled={!canRedo} onClick={redo}>
               <Redo2 size={14} />
             </IconButton>
-            <div className={css({ w: 'px', h: '4', bg: 'border', mx: '1' })} />
             {scanImage && (
               <IconButton
                 size="xs"
@@ -453,7 +526,6 @@ export function EditorCanvas() {
             >
               {showOutlines ? <Shapes size={14} /> : <EyeOff size={14} />}
             </IconButton>
-            <div className={css({ w: 'px', h: '4', bg: 'border', mx: '1' })} />
           </>
         }
       >
