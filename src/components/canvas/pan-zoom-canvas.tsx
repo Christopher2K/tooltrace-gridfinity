@@ -15,6 +15,8 @@ const zoomControls = css({
   right: '3',
   display: 'flex',
   alignItems: 'center',
+  // Touch-sized buttons must never squish when horizontal space is tight.
+  '& > *': { flexShrink: '0' },
   bg: 'bg.surface',
   borderWidth: '1px',
   borderColor: 'border.strong',

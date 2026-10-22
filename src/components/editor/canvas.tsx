@@ -38,7 +38,9 @@ const snapGuide = css({ stroke: 'canvas.selection', strokeDasharray: '1.5 1.5', 
 
 const overlayPill = css({
   position: 'absolute',
-  display: 'inline-flex',
+  // Hidden on phones: the tray pill collides with the touch-sized toolbar up there.
+  // (The coords pill never renders on touch anyway — hover only.)
+  display: { base: 'none', sm: 'inline-flex' },
   alignItems: 'center',
   px: '2.5',
   py: '1',
@@ -83,6 +85,8 @@ export function EditorCanvas() {
   const [showOutlines, setShowOutlines] = useState(true)
   const { menu, openMenu, closeMenu } = useContextMenu()
   const isTouch = useIsTouch()
+  // Canvas chrome buttons match the zoom cluster's touch sizing (min 44px targets).
+  const chromeSize = isTouch ? 'sm' : 'xs'
   // Live pointer position over the canvas (mm), shown in the bottom-right pill.
   const [hoverMm, setHoverMm] = useState<Point | null>(null)
 
@@ -470,7 +474,8 @@ export function EditorCanvas() {
         }}
         overlaySlot={
           <>
-            {/* Tray info pill — top left */}
+            {/* Tray info pill — top left (hidden on phones via overlayPill;
+                the tray meta pills row below the canvas shows the same info) */}
             <span className={cx(overlayPill, css({ top: '3', left: '3' }))}>
               TRAY {tray.widthUnits} × {tray.heightUnits} · {trayW} × {trayH} MM
             </span>
@@ -500,31 +505,31 @@ export function EditorCanvas() {
         }
         controlsSlot={
           <>
-            <IconButton size="xs" variant="plain" aria-label="Undo" disabled={!canUndo} onClick={undo}>
-              <Undo2 size={14} />
+            <IconButton size={chromeSize} variant="plain" aria-label="Undo" disabled={!canUndo} onClick={undo}>
+              <Undo2 size={isTouch ? 16 : 14} />
             </IconButton>
-            <IconButton size="xs" variant="plain" aria-label="Redo" disabled={!canRedo} onClick={redo}>
-              <Redo2 size={14} />
+            <IconButton size={chromeSize} variant="plain" aria-label="Redo" disabled={!canRedo} onClick={redo}>
+              <Redo2 size={isTouch ? 16 : 14} />
             </IconButton>
             {scanImage && (
               <IconButton
-                size="xs"
+                size={chromeSize}
                 variant="plain"
                 aria-label={showScan ? 'Hide scan photo' : 'Show scan photo'}
                 aria-pressed={showScan}
                 onClick={() => setShowScan((v) => !v)}
               >
-                {showScan ? <ImageIcon size={14} /> : <ImageOff size={14} />}
+                {showScan ? <ImageIcon size={isTouch ? 16 : 14} /> : <ImageOff size={isTouch ? 16 : 14} />}
               </IconButton>
             )}
             <IconButton
-              size="xs"
+              size={chromeSize}
               variant="plain"
               aria-label={showOutlines ? 'Hide outlines' : 'Show outlines'}
               aria-pressed={showOutlines}
               onClick={() => setShowOutlines((v) => !v)}
             >
-              {showOutlines ? <Shapes size={14} /> : <EyeOff size={14} />}
+              {showOutlines ? <Shapes size={isTouch ? 16 : 14} /> : <EyeOff size={isTouch ? 16 : 14} />}
             </IconButton>
           </>
         }
