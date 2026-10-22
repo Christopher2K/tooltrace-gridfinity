@@ -507,12 +507,14 @@ function NewTrace() {
                 alignItems: 'center',
                 justifyContent: 'center',
                 p: { base: '2', sm: '6' },
-                h: { base: '[264px]', lg: 'auto' },
-                minH: { lg: '[480px]' },
+                h: { base: '[264px]', lg: '[76dvh]' },
+                minH: { lg: '[400px]' },
+                maxH: { lg: '[760px]' },
                 overflow: 'hidden',
               })}
             >
-              <div className={css({ position: 'relative', h: 'full', maxW: 'full' })}>
+              {/* inline-block shrink-wraps the image so the SVG overlay aligns exactly */}
+              <div className={css({ position: 'relative', display: 'inline-block', h: 'full', maxW: 'full' })}>
                 <img
                   src={showMask && maskUrl ? maskUrl : scan.rectifiedImageUrl}
                   alt="Rectified scan with detected tool outlines"
@@ -526,7 +528,9 @@ function NewTrace() {
                     <polygon
                       key={tool.id}
                       className={overlayPoly}
-                      strokeWidth={scan.width * 0.003}
+                      strokeWidth={2}
+                      vectorEffect="non-scaling-stroke"
+                      strokeLinejoin="round"
                       points={tool.outline
                         .map((p) => `${(tool.position.x + p.x) / mmPerPx},${(tool.position.y + p.y) / mmPerPx}`)
                         .join(' ')}
@@ -587,120 +591,134 @@ function NewTrace() {
               </span>
             </div>
 
-            {/* Control rail */}
-            <Card.Root className={css({ w: { lg: '[340px]' }, flexShrink: { lg: '0' } })}>
-              <Card.Header>
-                <Card.Title>Detection</Card.Title>
-                <Card.Description>Tune until every tool is outlined</Card.Description>
-              </Card.Header>
-              <Card.Body>
-                {/* Stat */}
-                <div
+            {/* Control rail: card on desktop, bare stack on mobile (per pen frames) */}
+            <div
+              className={css({
+                display: 'flex',
+                flexDir: 'column',
+                gap: { base: '4', lg: '3' },
+                w: { lg: '[340px]' },
+                flexShrink: { lg: '0' },
+                bg: { lg: 'bg.surface' },
+                borderWidth: { lg: '1px' },
+                borderColor: { lg: 'border' },
+                borderRadius: { lg: 'l3' },
+                p: { lg: '4' },
+                alignSelf: { lg: 'flex-start' },
+              })}
+            >
+              <div className={css({ display: { base: 'none', lg: 'flex' }, flexDir: 'column', gap: '1' })}>
+                <span className={css({ textStyle: 'h3' })}>Detection</span>
+                <span className={css({ textStyle: 'body-sm', color: 'fg.muted' })}>
+                  Tune until every tool is outlined
+                </span>
+              </div>
+              {/* Stat */}
+              <div
+                className={css({
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  gap: '2',
+                  pb: { lg: '3' },
+                  borderBottomWidth: { lg: '1px' },
+                  borderColor: 'border',
+                })}
+              >
+                <span
                   className={css({
-                    display: 'flex',
-                    alignItems: 'baseline',
-                    gap: '2',
-                    pb: { lg: '3' },
-                    borderBottomWidth: { lg: '1px' },
-                    borderColor: 'border',
+                    fontFamily: 'mono',
+                    fontWeight: 'medium',
+                    fontSize: { base: '20px', lg: '32px' },
+                    lineHeight: { base: '26px', lg: '42px' },
+                    color: 'fg.default',
                   })}
                 >
-                  <span
-                    className={css({
-                      fontFamily: 'mono',
-                      fontWeight: 'medium',
-                      fontSize: { base: '20px', lg: '32px' },
-                      lineHeight: { base: '26px', lg: '42px' },
-                      color: 'fg.default',
-                    })}
-                  >
-                    {detected.length}
+                  {detected.length}
+                </span>
+                <span className={css({ textStyle: 'body-sm', color: 'fg.muted' })}>tools detected</span>
+              </div>
+
+              <Slider.Root
+                value={[thresholdOffset]}
+                min={-40}
+                max={40}
+                step={1}
+                onValueChange={(d) => setThresholdOffset(d.value[0])}
+              >
+                <div className={css({ display: 'flex', justifyContent: 'space-between' })}>
+                  <Slider.Label>Sensitivity</Slider.Label>
+                  <span className={css({ fontFamily: 'mono', fontSize: '12px', lineHeight: '16px', color: 'fg.muted' })}>
+                    {thresholdOffset > 0 ? `+${thresholdOffset}` : thresholdOffset}
                   </span>
-                  <span className={css({ textStyle: 'body-sm', color: 'fg.muted' })}>tools detected</span>
                 </div>
+                <Slider.Control>
+                  <Slider.Track>
+                    <Slider.Range />
+                  </Slider.Track>
+                  <Slider.Thumb index={0} />
+                </Slider.Control>
+              </Slider.Root>
+              <p className={css({ fontSize: '12px', lineHeight: '17px', color: 'fg.subtle' })}>
+                Raise sensitivity to catch lighter tools; lower it if shadows or paper texture get
+                detected.
+              </p>
 
-                <Slider.Root
-                  value={[thresholdOffset]}
-                  min={-40}
-                  max={40}
-                  step={1}
-                  onValueChange={(d) => setThresholdOffset(d.value[0])}
+              <div className={css({ display: 'flex', flexDir: 'column', gap: '2.5' })}>
+                <Switch.Root
+                  className={css({ display: 'flex', alignItems: 'center', gap: '2' })}
+                  checked={highDetail}
+                  onCheckedChange={(d) => setHighDetail(d.checked)}
                 >
-                  <div className={css({ display: 'flex', justifyContent: 'space-between' })}>
-                    <Slider.Label>Sensitivity</Slider.Label>
-                    <span className={css({ fontFamily: 'mono', fontSize: '12px', lineHeight: '16px', color: 'fg.muted' })}>
-                      {thresholdOffset > 0 ? `+${thresholdOffset}` : thresholdOffset}
-                    </span>
+                  <Switch.Control />
+                  <Switch.Label>High detail outlines</Switch.Label>
+                  <Switch.HiddenInput />
+                </Switch.Root>
+                <Switch.Root
+                  className={css({ display: 'flex', alignItems: 'center', gap: '2' })}
+                  checked={showMask}
+                  onCheckedChange={(d) => setShowMask(d.checked)}
+                >
+                  <Switch.Control />
+                  <Switch.Label>Show detection mask</Switch.Label>
+                  <Switch.HiddenInput />
+                </Switch.Root>
+                {scan.quadSource === 'markers' && (
+                  <div className={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+                    <span className={css({ textStyle: 'body-sm', color: 'fg.muted' })}>Printed sheet:</span>
+                    {(['a4', 'letter'] as const).map((p) => (
+                      <Button
+                        key={p}
+                        size="xs"
+                        variant={getTemplatePaperSize() === p ? 'solid' : 'outline'}
+                        disabled={processing}
+                        onClick={() => changeTemplatePaper(p)}
+                      >
+                        {p === 'a4' ? 'A4' : 'Letter'}
+                      </Button>
+                    ))}
                   </div>
-                  <Slider.Control>
-                    <Slider.Track>
-                      <Slider.Range />
-                    </Slider.Track>
-                    <Slider.Thumb index={0} />
-                  </Slider.Control>
-                </Slider.Root>
-                <p className={css({ fontSize: '12px', lineHeight: '17px', color: 'fg.subtle' })}>
-                  Raise sensitivity to catch lighter tools; lower it if shadows or paper texture get
-                  detected.
-                </p>
+                )}
+              </div>
 
-                <div className={css({ display: 'flex', flexDir: 'column', gap: '2.5' })}>
-                  <Switch.Root
-                    className={css({ display: 'flex', alignItems: 'center', gap: '2' })}
-                    checked={highDetail}
-                    onCheckedChange={(d) => setHighDetail(d.checked)}
-                  >
-                    <Switch.Control />
-                    <Switch.Label>High detail outlines</Switch.Label>
-                    <Switch.HiddenInput />
-                  </Switch.Root>
-                  <Switch.Root
-                    className={css({ display: 'flex', alignItems: 'center', gap: '2' })}
-                    checked={showMask}
-                    onCheckedChange={(d) => setShowMask(d.checked)}
-                  >
-                    <Switch.Control />
-                    <Switch.Label>Show detection mask</Switch.Label>
-                    <Switch.HiddenInput />
-                  </Switch.Root>
-                  {scan.quadSource === 'markers' && (
-                    <div className={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-                      <span className={css({ textStyle: 'body-sm', color: 'fg.muted' })}>Printed sheet:</span>
-                      {(['a4', 'letter'] as const).map((p) => (
-                        <Button
-                          key={p}
-                          size="xs"
-                          variant={getTemplatePaperSize() === p ? 'solid' : 'outline'}
-                          disabled={processing}
-                          onClick={() => changeTemplatePaper(p)}
-                        >
-                          {p === 'a4' ? 'A4' : 'Letter'}
-                        </Button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className={css({ display: 'flex', flexDir: 'column', gap: '2' })}>
-                  <Button
-                    colorPalette="grass"
-                    onClick={openEditor}
-                    disabled={detected.length === 0}
-                    className={css({ w: 'full', h: { base: '11', sm: '9' } })}
-                  >
-                    <ArrowRight size={16} /> Open editor with {detected.length} tool{detected.length === 1 ? '' : 's'}
-                  </Button>
-                  <Button variant="plain" onClick={reset} className={css({ w: 'full', color: 'fg.muted' })}>
-                    <RotateCcw size={16} /> Try another photo
-                  </Button>
-                  {detected.length === 0 && (
-                    <p className={css({ fontSize: '12px', lineHeight: '15px', color: 'error.fg' })}>
-                      Nothing detected at this sensitivity — adjust the slider or retake the photo.
-                    </p>
-                  )}
-                </div>
-              </Card.Body>
-            </Card.Root>
+              <div className={css({ display: 'flex', flexDir: 'column', gap: '2' })}>
+                <Button
+                  colorPalette="grass"
+                  onClick={openEditor}
+                  disabled={detected.length === 0}
+                  className={css({ w: 'full', h: { base: '11', sm: '9' } })}
+                >
+                  <ArrowRight size={16} /> Open editor with {detected.length} tool{detected.length === 1 ? '' : 's'}
+                </Button>
+                <Button variant="plain" onClick={reset} className={css({ w: 'full', color: 'fg.muted' })}>
+                  <RotateCcw size={16} /> Try another photo
+                </Button>
+                {detected.length === 0 && (
+                  <p className={css({ fontSize: '12px', lineHeight: '15px', color: 'error.fg' })}>
+                    Nothing detected at this sensitivity — adjust the slider or retake the photo.
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}
