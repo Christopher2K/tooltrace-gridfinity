@@ -1,8 +1,9 @@
 import { createListCollection } from '@ark-ui/react'
 import { useRef, useState } from 'react'
-import { Download, FileDown, FileUp } from 'lucide-react'
-import { css } from '~/styled-system/css'
+import { Download, FileDown, FileUp, TriangleAlert } from 'lucide-react'
+import { css, cx } from '~/styled-system/css'
 import { Button, Card, Select, Text } from '~/components/ui'
+import { panelBody, panelHeader, panelRoot } from '~/components/editor/panel'
 import { buildBinMesh } from '~/lib/gridfinity'
 import { downloadPdf, generateLayoutPdf, PAPER_SIZES, type PaperSize } from '~/lib/pdf'
 import { downloadProject, parseProject } from '~/lib/project'
@@ -12,12 +13,20 @@ import { useEditorStore } from '~/stores/editor'
 
 const col = css({ display: 'flex', flexDir: 'column', gap: '2' })
 const hiddenInput = css({ display: 'none' })
-const warnText = css({ color: 'red.9' })
+const issueNote = css({
+  display: 'flex',
+  alignItems: 'flex-start',
+  gap: '1.5',
+  fontSize: '12px',
+  lineHeight: '15px',
+  color: 'warning.fg',
+  _icon: { boxSize: '3', flexShrink: '0', mt: 'px' },
+})
 
 const paperCollection = createListCollection({
   items: (Object.keys(PAPER_SIZES) as PaperSize[]).map((value) => ({
     value,
-    label: `${PAPER_SIZES[value].label} (${PAPER_SIZES[value].widthMm} × ${PAPER_SIZES[value].heightMm} mm)`,
+    label: `${PAPER_SIZES[value].label} · ${PAPER_SIZES[value].widthMm} × ${PAPER_SIZES[value].heightMm} mm`,
   })),
 })
 
@@ -95,14 +104,14 @@ export function ExportPanel() {
 
   return (
     <>
-      <Card.Root>
-        <Card.Header>
+      <Card.Root className={panelRoot}>
+        <Card.Header className={panelHeader}>
           <Card.Title>Export</Card.Title>
           <Card.Description>3D-printable bin and 1:1 print-test layout</Card.Description>
         </Card.Header>
-        <Card.Body className={col}>
-          <Button onClick={exportStl} disabled={busy !== null}>
-            <Download size={14} /> {busy === 'stl' ? 'Building…' : 'Download STL'}
+        <Card.Body className={cx(col, panelBody)}>
+          <Button colorPalette="grass" onClick={exportStl} disabled={busy !== null} className={css({ w: 'full' })}>
+            <Download size={16} /> {busy === 'stl' ? 'Building…' : 'Download STL'}
           </Button>
 
           <Select.Root
@@ -131,29 +140,32 @@ export function ExportPanel() {
             <Select.HiddenSelect name="paper-size" />
           </Select.Root>
 
-          <Button onClick={exportPdf} disabled={busy !== null} variant="outline">
-            <Download size={14} /> {busy === 'pdf' ? 'Building…' : 'Download print-test PDF'}
+          <Button onClick={exportPdf} disabled={busy !== null} variant="outline" className={css({ w: 'full' })}>
+            <Download size={16} /> {busy === 'pdf' ? 'Building…' : 'Download print-test PDF'}
           </Button>
 
           {issues.length > 0 && (
-            <Text textStyle="xs" className={warnText}>
-              ⚠ {issues.length} layout issue(s) — see Checks panel
-            </Text>
+            <p className={issueNote}>
+              <TriangleAlert />
+              <span>
+                {issues.length} layout issue{issues.length === 1 ? '' : 's'} — see Checks
+              </span>
+            </p>
           )}
           {stats && (
-            <Text textStyle="xs" color="fg.subtle">
+            <Text textStyle="mono-sm" color="fg.subtle">
               {stats}
             </Text>
           )}
         </Card.Body>
       </Card.Root>
 
-      <Card.Root>
-        <Card.Header>
+      <Card.Root className={panelRoot}>
+        <Card.Header className={panelHeader}>
           <Card.Title>Project</Card.Title>
           <Card.Description>Save or load a local project file</Card.Description>
         </Card.Header>
-        <Card.Body className={col}>
+        <Card.Body className={cx(col, panelBody)}>
           <Button variant="outline" onClick={() => downloadProject(tray, tools)}>
             <FileDown size={14} /> Download project JSON
           </Button>
@@ -169,7 +181,7 @@ export function ExportPanel() {
             onChange={onLoadFile}
           />
           {loadError && (
-            <Text textStyle="xs" className={warnText}>
+            <Text textStyle="body-sm" color="error.fg">
               {loadError}
             </Text>
           )}

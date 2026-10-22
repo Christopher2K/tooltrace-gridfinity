@@ -1,6 +1,7 @@
-import { css } from '~/styled-system/css'
-import { Card, NumberInput, Switch, Text } from '~/components/ui'
+import { css, cx } from '~/styled-system/css'
+import { Card, NumberInput, Switch } from '~/components/ui'
 import { GRID_UNIT_MM, useEditorStore } from '~/stores/editor'
+import { panelBody, panelHeader, panelRoot } from '~/components/editor/panel'
 
 const fieldCol = css({ display: 'flex', flexDir: 'column', gap: '4' })
 const switchRow = css({ display: 'flex', alignItems: 'center', gap: '2' })
@@ -17,12 +18,12 @@ export function TrayPanel() {
   const binHeightMm = tray.heightLevelUnits * 7 + 4.4 // 7U + stacking lip
 
   return (
-    <Card.Root>
-      <Card.Header>
+    <Card.Root className={panelRoot}>
+      <Card.Header className={panelHeader}>
         <Card.Title>Tray</Card.Title>
-        <Card.Description>Gridfinity units (42 mm)</Card.Description>
+        <Card.Description>Gridfinity units · 42 mm</Card.Description>
       </Card.Header>
-      <Card.Body className={fieldCol}>
+      <Card.Body className={cx(fieldCol, panelBody)}>
         <NumberInput.Root
           value={String(tray.widthUnits)}
           min={1}
@@ -64,9 +65,14 @@ export function TrayPanel() {
           <Switch.HiddenInput />
         </Switch.Root>
 
-        <Text textStyle="sm" color="fg.muted">
-          {trayW} × {trayH} mm · {binHeightMm} mm tall
-        </Text>
+        <div className={css({ borderTopWidth: '1px', borderColor: 'border', pt: '3', display: 'flex', flexDir: 'column', gap: '1' })}>
+          <span className={css({ fontFamily: 'mono', fontSize: '12px', lineHeight: '16px', color: 'fg.default' })}>
+            {trayW} × {trayH} mm
+          </span>
+          <span className={css({ fontFamily: 'mono', fontSize: '11px', lineHeight: '14px', color: 'fg.subtle' })}>
+            {binHeightMm} mm tall · 0.5 mm tol
+          </span>
+        </div>
       </Card.Body>
     </Card.Root>
   )

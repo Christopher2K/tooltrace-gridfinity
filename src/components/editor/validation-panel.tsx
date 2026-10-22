@@ -1,10 +1,19 @@
-import { css } from '~/styled-system/css'
-import { Card, Text } from '~/components/ui'
+import { CircleCheck, TriangleAlert } from 'lucide-react'
+import { css, cx } from '~/styled-system/css'
+import { Card } from '~/components/ui'
 import { validateLayout } from '~/lib/validation'
 import { useEditorStore } from '~/stores/editor'
+import { panelBody, panelHeader, panelRoot } from '~/components/editor/panel'
 
-const okText = css({ color: 'grass.9' })
-const warnText = css({ color: 'red.9' })
+const checkRow = css({
+  display: 'flex',
+  alignItems: 'flex-start',
+  gap: '2',
+  fontSize: '12px',
+  lineHeight: '15px',
+  color: 'fg.muted',
+  _icon: { boxSize: '3.5', flexShrink: '0', mt: 'px' },
+})
 
 export function ValidationPanel() {
   const tools = useEditorStore((s) => s.tools)
@@ -13,25 +22,24 @@ export function ValidationPanel() {
   const warnings = validateLayout(tray, tools)
 
   return (
-    <Card.Root>
-      <Card.Header>
+    <Card.Root className={cx(panelRoot, css({ order: { base: '-1', lg: '0' } }))}>
+      <Card.Header className={panelHeader}>
         <Card.Title>Checks</Card.Title>
+        <Card.Description>Layout validation</Card.Description>
       </Card.Header>
-      <Card.Body>
+      <Card.Body className={cx(css({ display: 'flex', flexDir: 'column', gap: '2' }), panelBody)}>
         {warnings.length === 0 ? (
-          <Text textStyle="sm" className={okText}>
-            ✓ No issues
-          </Text>
+          <div className={checkRow}>
+            <CircleCheck className={css({ color: 'success.fg' })} />
+            <span>All tools fit — no layout issues</span>
+          </div>
         ) : (
-          <ul className={css({ display: 'flex', flexDir: 'column', gap: '1', pl: '4', listStyle: 'disc' })}>
-            {warnings.map((w) => (
-              <li key={w}>
-                <Text textStyle="sm" className={warnText}>
-                  {w}
-                </Text>
-              </li>
-            ))}
-          </ul>
+          warnings.map((w) => (
+            <div key={w} className={checkRow}>
+              <TriangleAlert className={css({ color: 'warning.fg' })} />
+              <span>{w}</span>
+            </div>
+          ))
         )}
       </Card.Body>
     </Card.Root>
