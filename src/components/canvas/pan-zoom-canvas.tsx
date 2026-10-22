@@ -3,6 +3,7 @@ import { css, cx } from '~/styled-system/css'
 import { Button, IconButton } from '~/components/ui'
 import { useIsTouch } from '~/hooks/use-is-touch'
 import { PINCH_START_EVENT, longPressMenuEvent, setPinchActive, startPointerGesture, type LongPressPoint } from './pointer-gesture'
+import { svgContentTransform } from './svg-transform'
 import type { Point, View } from './types'
 
 const containerBase = css({ position: 'relative' })
@@ -169,9 +170,10 @@ export function PanZoomCanvas(props: PanZoomCanvasProps) {
     const clientToMm = (cx: number, cy: number): Point => {
       const rect = svgRef.current!.getBoundingClientRect()
       const base = viewRef.current
+      const { scale, offX, offY } = svgContentTransform(rect, base)
       return {
-        x: base.x + ((cx - rect.left) / rect.width) * base.w,
-        y: base.y + ((cy - rect.top) / rect.height) * base.h,
+        x: base.x + (cx - rect.left - offX) / scale,
+        y: base.y + (cy - rect.top - offY) / scale,
       }
     }
 
@@ -210,9 +212,10 @@ export function PanZoomCanvas(props: PanZoomCanvasProps) {
       // Keep the anchor mm point pinned under the current finger midpoint.
       const midX = (pts[0].x + pts[1].x) / 2
       const midY = (pts[0].y + pts[1].y) / 2
+      const { scale, offX, offY } = svgContentTransform(rect, { x: 0, y: 0, w, h })
       setView({
-        x: pinch.anchorMm.x - ((midX - rect.left) / rect.width) * w,
-        y: pinch.anchorMm.y - ((midY - rect.top) / rect.height) * h,
+        x: pinch.anchorMm.x - (midX - rect.left - offX) / scale,
+        y: pinch.anchorMm.y - (midY - rect.top - offY) / scale,
         w,
         h,
       })
@@ -291,13 +294,15 @@ export function PanZoomCanvas(props: PanZoomCanvasProps) {
       const rect = el.getBoundingClientRect()
       if (e.ctrlKey || e.metaKey) {
         // Pinch gesture (trackpad) or Ctrl+wheel (mouse) → zoom
-        const mx = view.x + ((e.clientX - rect.left) / rect.width) * view.w
-        const my = view.y + ((e.clientY - rect.top) / rect.height) * view.h
+        const { scale, offX, offY } = svgContentTransform(rect, view)
+        const mx = view.x + (e.clientX - rect.left - offX) / scale
+        const my = view.y + (e.clientY - rect.top - offY) / scale
         zoomBy(Math.exp(e.deltaY * zoomIntensity), { x: mx, y: my })
       } else {
         // Scroll → pan
-        const dxMm = (e.deltaX / rect.width) * view.w
-        const dyMm = (e.deltaY / rect.height) * view.h
+        const { scale } = svgContentTransform(rect, view)
+        const dxMm = e.deltaX / scale
+        const dyMm = e.deltaY / scale
         setView({
           ...view,
           x: view.x + (e.shiftKey ? dyMm : dxMm),
@@ -313,9 +318,10 @@ export function PanZoomCanvas(props: PanZoomCanvasProps) {
   function toMm(e: { clientX: number; clientY: number }): Point {
     const rect = svgRef.current!.getBoundingClientRect()
     const base = view ?? computeFitRef.current()
+    const { scale, offX, offY } = svgContentTransform(rect, base)
     return {
-      x: base.x + ((e.clientX - rect.left) / rect.width) * base.w,
-      y: base.y + ((e.clientY - rect.top) / rect.height) * base.h,
+      x: base.x + (e.clientX - rect.left - offX) / scale,
+      y: base.y + (e.clientY - rect.top - offY) / scale,
     }
   }
 
@@ -323,7 +329,8 @@ export function PanZoomCanvas(props: PanZoomCanvasProps) {
     const rect = svgRef.current?.getBoundingClientRect()
     const base = view ?? computeFitRef.current()
     // Before the SVG mounts, assume ~1000 px of canvas width.
-    return rect && rect.width > 0 ? (px / rect.width) * base.w : (px / 1000) * base.w
+    if (!rect || rect.width <= 0) return (px / 1000) * base.w
+    return px / svgContentTransform(rect, base).scale
   }
 
   const ctx: PanZoomContextValue = { view: v, toMm, pxToMm, zoomBy, zoomToFit }
@@ -342,10 +349,11 @@ export function PanZoomCanvas(props: PanZoomCanvasProps) {
           const dy = ev.clientY - start.y
           if (Math.abs(dx) + Math.abs(dy) > 3) moved = true
           const rect = svgRef.current!.getBoundingClientRect()
+          const { scale } = svgContentTransform(rect, startView)
           setView({
             ...startView,
-            x: startView.x - (dx / rect.width) * startView.w,
-            y: startView.y - (dy / rect.height) * startView.h,
+            x: startView.x - dx / scale,
+            y: startView.y - dy / scale,
           })
         },
         onUp: () => {
