@@ -69,7 +69,8 @@ function RootDocument({ children }: { children: React.ReactNode }) {
             alignItems: 'center',
             gap: '6',
             px: { base: '4', sm: '6' },
-            h: { base: '13', sm: '14' },
+            // Panda's spacing scale skips 13 — explicit px (design: 52 mobile / 56 desktop).
+            h: { base: '[52px]', sm: '[56px]' },
             flexShrink: '0',
             bg: 'bg.surface',
             borderBottomWidth: '1px',
