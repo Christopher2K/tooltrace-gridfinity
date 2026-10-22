@@ -16,8 +16,13 @@ export const slider = defineSlotRecipe({
       width: 'full',
     },
     label: {
-      fontWeight: 'medium',
-      textStyle: 'sm',
+      textStyle: 'label',
+    },
+    valueText: {
+      fontFamily: 'mono',
+      fontSize: '12px',
+      lineHeight: '16px',
+      color: 'fg.muted',
     },
     control: {
       display: 'inline-flex',
@@ -25,7 +30,7 @@ export const slider = defineSlotRecipe({
     },
     track: {
       overflow: 'hidden',
-      borderRadius: 'full',
+      borderRadius: 'l1',
       flex: '1',
     },
     range: {
@@ -75,8 +80,8 @@ export const slider = defineSlotRecipe({
     size: {
       sm: {
         root: {
-          '--slider-thumb-size': 'sizes.5',
-          '--slider-track-size': 'sizes.2',
+          '--slider-thumb-size': 'sizes.4.5',
+          '--slider-track-size': 'sizes.1',
           '--slider-marker-center': '8px',
           '--slider-marker-size': 'sizes.1',
           '--slider-marker-inset': '4px',
@@ -84,8 +89,8 @@ export const slider = defineSlotRecipe({
       },
       md: {
         root: {
-          '--slider-thumb-size': 'sizes.5',
-          '--slider-track-size': 'sizes.2',
+          '--slider-thumb-size': 'sizes.4.5',
+          '--slider-track-size': 'sizes.1',
           '--slider-marker-center': '8px',
           '--slider-marker-size': 'sizes.1',
           '--slider-marker-inset': '4px',
@@ -93,8 +98,8 @@ export const slider = defineSlotRecipe({
       },
       lg: {
         root: {
-          '--slider-thumb-size': 'sizes.5',
-          '--slider-track-size': 'sizes.2',
+          '--slider-thumb-size': 'sizes.4.5',
+          '--slider-track-size': 'sizes.1',
           '--slider-marker-center': '8px',
           '--slider-marker-size': 'sizes.1',
           '--slider-marker-inset': '4px',
@@ -104,16 +109,16 @@ export const slider = defineSlotRecipe({
     variant: {
       outline: {
         thumb: {
-          bg: 'gray.surface.bg',
-          borderWidth: '2px',
-          borderColor: 'colorPalette.solid.bg',
-          boxShadow: 'xs',
+          bg: 'white',
+          borderWidth: '1px',
+          borderColor: 'border.strong',
         },
         range: {
-          bg: 'colorPalette.solid.bg',
+          // Accent range: the slider's only job is tuning detection.
+          bg: 'grass.9',
         },
         track: {
-          bg: 'border',
+          bg: 'gray.5',
         },
       },
     },

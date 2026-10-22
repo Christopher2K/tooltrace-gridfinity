@@ -53,12 +53,15 @@ export const numberInput = defineSlotRecipe({
     },
     input: {
       ...input.base,
+      // Measurement values are always mono (design system §2.2).
+      fontFamily: 'mono',
+      fontSize: '13px',
       verticalAlign: 'top',
       pe: 'calc(var(--stepper-width) + 0.5rem)',
     },
     label: {
       color: 'fg.default',
-      fontWeight: 'medium',
+      textStyle: 'label',
     },
     incrementTrigger: {
       ...trigger,
@@ -79,7 +82,7 @@ export const numberInput = defineSlotRecipe({
         // Mirror the input's --input-height on the root so the control slot
         // (a child of the root) can size itself to the input, not the root.
         root: {
-          '--input-height': 'sizes.9',
+          '--input-height': 'sizes.8',
         },
         control: {
           '--stepper-width': 'sizes.4.5',
@@ -88,19 +91,19 @@ export const numberInput = defineSlotRecipe({
       },
       md: {
         root: {
-          '--input-height': 'sizes.10',
+          '--input-height': 'sizes.9',
         },
         control: {
-          '--stepper-width': 'sizes.5',
+          '--stepper-width': 'sizes.7',
         },
         input: input.variants.size.md,
       },
       lg: {
         root: {
-          '--input-height': 'sizes.11',
+          '--input-height': 'sizes.10',
         },
         control: {
-          '--stepper-width': 'sizes.5.5',
+          '--stepper-width': 'sizes.7',
         },
         input: input.variants.size.lg,
       },

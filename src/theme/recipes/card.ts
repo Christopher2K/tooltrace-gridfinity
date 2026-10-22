@@ -15,30 +15,32 @@ export const card = defineSlotRecipe({
       display: 'flex',
       flexDirection: 'column',
       gap: '1',
-      p: '6',
+      px: '4',
+      pt: '3.5',
+      pb: '2.5',
     },
     body: {
       display: 'flex',
       flex: '1',
       flexDirection: 'column',
-      pb: '6',
-      px: '6',
+      gap: '3',
+      pb: '4',
+      px: '4',
     },
     footer: {
       display: 'flex',
       justifyContent: 'flex-end',
       gap: '3',
-      pb: '6',
+      pb: '4',
       pt: '2',
-      px: '6',
+      px: '4',
     },
     title: {
-      textStyle: 'lg',
-      fontWeight: 'semibold',
+      textStyle: 'h3',
     },
     description: {
       color: 'fg.muted',
-      textStyle: 'sm',
+      textStyle: 'body-sm',
     },
   },
   defaultVariants: {
@@ -49,7 +51,7 @@ export const card = defineSlotRecipe({
       elevated: {
         root: {
           bg: 'gray.surface.bg',
-          boxShadow: 'lg',
+          borderWidth: '1px',
         },
       },
       outline: {

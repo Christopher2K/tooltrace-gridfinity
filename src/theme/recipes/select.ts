@@ -13,8 +13,10 @@ export const select = defineSlotRecipe({
     },
     content: {
       background: 'gray.surface.bg',
-      borderRadius: 'l2',
-      boxShadow: 'md',
+      borderRadius: 'l3',
+      borderWidth: '1px',
+      borderColor: 'border',
+      boxShadow: 'sm',
       display: 'flex',
       flexDirection: 'column',
       maxH: 'min(var(--available-height), {sizes.96})',
@@ -80,9 +82,8 @@ export const select = defineSlotRecipe({
       color: 'colorPalette.plain.fg',
     },
     label: {
-      fontWeight: 'medium',
       userSelect: 'none',
-      textStyle: 'sm',
+      textStyle: 'label',
     },
     trigger: {
       alignItems: 'center',
@@ -107,6 +108,8 @@ export const select = defineSlotRecipe({
       overflow: 'hidden',
       textOverflow: 'ellipsis',
       whiteSpace: 'nowrap',
+      // Selected value carries units — mono per the design system.
+      fontFamily: 'mono',
     },
   },
   defaultVariants: {
@@ -142,11 +145,11 @@ export const select = defineSlotRecipe({
         trigger: { px: '2', h: '8', textStyle: 'sm', gap: '2', _icon: { boxSize: '3.5' } },
       },
       sm: {
-        content: { p: '1', gap: '0.5', textStyle: 'sm' },
-        item: { px: '1.5', minH: '9', gap: '2', _icon: { boxSize: '4' } },
+        content: { p: '1', gap: '0.5', textStyle: 'body-sm' },
+        item: { px: '1.5', minH: '8', gap: '2', _icon: { boxSize: '4' } },
         itemGroup: { gap: '0.5' },
-        itemGroupLabel: { px: '1.5', height: '9' },
-        trigger: { px: '2.5', h: '9', textStyle: 'sm', gap: '2', _icon: { boxSize: '4' } },
+        itemGroupLabel: { px: '1.5', height: '8' },
+        trigger: { px: '2.5', h: '8', textStyle: 'body-sm', gap: '2', _icon: { boxSize: '4' } },
       },
       md: {
         content: { p: '1', gap: '0.5', textStyle: 'md' },

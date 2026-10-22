@@ -28,6 +28,8 @@ export const input = {
         borderWidth: '1px',
         borderColor: 'gray.outline.border',
         focusVisibleRing: 'inside',
+        focusRingColor: 'grass.9',
+        focusRingWidth: '2px',
         _invalid: {
           focusRingColor: 'error',
           borderColor: 'error',
@@ -78,10 +80,10 @@ export const input = {
     },
     size: {
       '2xs': { textStyle: 'xs', px: '1.5', '--input-height': 'sizes.7' },
-      xs: { textStyle: 'sm', px: '2', '--input-height': 'sizes.8' },
-      sm: { textStyle: 'sm', px: '2.5', '--input-height': 'sizes.9' },
-      md: { textStyle: 'md', px: '3', '--input-height': 'sizes.10' },
-      lg: { textStyle: 'md', px: '3.5', '--input-height': 'sizes.11' },
+      xs: { textStyle: 'body-sm', px: '2', '--input-height': 'sizes.7' },
+      sm: { textStyle: 'body-sm', px: '2.5', '--input-height': 'sizes.8' },
+      md: { textStyle: 'body', px: '3', '--input-height': 'sizes.9' },
+      lg: { textStyle: 'body', px: '3.5', '--input-height': 'sizes.10' },
       xl: { textStyle: 'lg', px: '4', '--input-height': 'sizes.12' },
       '2xl': { textStyle: '3xl', px: '4.5', '--input-height': 'sizes.16' },
     },

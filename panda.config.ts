@@ -1,9 +1,10 @@
 import { defineConfig } from '@pandacss/dev'
 
 import { animationStyles } from './src/theme/animation-styles'
+import { amberRamp } from './src/theme/colors/amber'
 import { grass } from './src/theme/colors/grass'
 import { red } from './src/theme/colors/red'
-import { sand } from './src/theme/colors/sand'
+import { slateRamp } from './src/theme/colors/slate'
 import { conditions } from './src/theme/conditions'
 import { globalCss } from './src/theme/global-css'
 import { keyframes } from './src/theme/keyframes'
@@ -52,25 +53,63 @@ export default defineConfig({
         colors,
         durations,
         zIndex,
+        // Local webfonts (@fontsource*, imported in src/routes/__root.tsx).
+        fonts: {
+          display: { value: "'Space Grotesk Variable', 'Space Grotesk', sans-serif" },
+          body: { value: "'Inter Variable', 'Inter', sans-serif" },
+          mono: { value: "'IBM Plex Mono', monospace" },
+        },
       },
       semanticTokens: {
         colors: {
           grass,
           red,
-          gray: sand,
+          amber: amberRamp,
+          gray: slateRamp,
           bg: {
-            canvas: { value: { _light: '{colors.gray.1}', _dark: '{colors.gray.1}' } },
+            canvas: { value: { _light: '#F7F9FB', _dark: '#F7F9FB' } },
             default: { value: { _light: '{colors.white}', _dark: '{colors.white}' } },
-            subtle: { value: { _light: '{colors.gray.2}', _dark: '{colors.gray.2}' } },
-            muted: { value: { _light: '{colors.gray.3}', _dark: '{colors.gray.3}' } },
+            surface: { value: { _light: '{colors.white}', _dark: '{colors.white}' } },
+            subtle: { value: { _light: '{colors.gray.3}', _dark: '{colors.gray.3}' } },
+            muted: { value: { _light: '{colors.gray.4}', _dark: '{colors.gray.4}' } },
+            inverse: { value: { _light: '{colors.gray.12}', _dark: '{colors.gray.12}' } },
           },
           fg: {
             default: { value: { _light: '{colors.gray.12}', _dark: '{colors.gray.12}' } },
             muted: { value: { _light: '{colors.gray.11}', _dark: '{colors.gray.11}' } },
-            subtle: { value: { _light: '{colors.gray.10}', _dark: '{colors.gray.10}' } },
+            subtle: { value: { _light: '{colors.gray.9}', _dark: '{colors.gray.9}' } },
+            inverse: { value: { _light: '{colors.white}', _dark: '{colors.white}' } },
           },
-          border: { value: { _light: '{colors.gray.4}', _dark: '{colors.gray.4}' } },
-          error: { value: { _light: '{colors.red.9}', _dark: '{colors.red.9}' } },
+          border: {
+            DEFAULT: { value: { _light: '{colors.gray.5}', _dark: '{colors.gray.5}' } },
+            strong: { value: { _light: '{colors.gray.8}', _dark: '{colors.gray.8}' } },
+          },
+          success: {
+            fg: { value: { _light: '{colors.grass.11}', _dark: '{colors.grass.11}' } },
+          },
+          warning: {
+            solid: { value: { _light: '{colors.amber.9}', _dark: '{colors.amber.9}' } },
+            fg: { value: { _light: '{colors.amber.11}', _dark: '{colors.amber.11}' } },
+            subtle: { value: { _light: '{colors.amber.3}', _dark: '{colors.amber.3}' } },
+          },
+          error: {
+            DEFAULT: { value: { _light: '{colors.red.9}', _dark: '{colors.red.9}' } },
+            solid: { value: { _light: '{colors.red.9}', _dark: '{colors.red.9}' } },
+            fg: { value: { _light: '{colors.red.11}', _dark: '{colors.red.11}' } },
+            subtle: { value: { _light: '{colors.red.3}', _dark: '{colors.red.3}' } },
+          },
+          // Editor drawing surface (SVG canvas chrome).
+          canvas: {
+            bg: { value: { _light: '#F5F7F9', _dark: '#F5F7F9' } },
+            grid: { value: { _light: '{colors.gray.5}', _dark: '{colors.gray.5}' } },
+            gridMajor: { value: { _light: '{colors.gray.7}', _dark: '{colors.gray.7}' } },
+            tray: { value: { _light: '{colors.gray.11}', _dark: '{colors.gray.11}' } },
+            tool: { value: { _light: '#60646c99', _dark: '#60646c99' } },
+            toolFill: { value: { _light: '#1c20240a', _dark: '#1c20240a' } },
+            selection: { value: { _light: '{colors.grass.9}', _dark: '{colors.grass.9}' } },
+            selectionFill: { value: { _light: '{colors.grass.a3}', _dark: '{colors.grass.a3}' } },
+            invalid: { value: { _light: '{colors.red.9}', _dark: '{colors.red.9}' } },
+          },
         },
         shadows,
         radii: {

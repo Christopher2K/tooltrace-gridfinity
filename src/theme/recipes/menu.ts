@@ -10,7 +10,9 @@ export const menu = defineSlotRecipe({
 
       bg: 'gray.surface.bg',
       borderRadius: 'l3',
-      boxShadow: 'md',
+      borderWidth: '1px',
+      borderColor: 'border',
+      boxShadow: 'sm',
       display: 'flex',
       flexDirection: 'column',
       maxH: 'min(var(--available-height), {sizes.96})',
@@ -98,11 +100,11 @@ export const menu = defineSlotRecipe({
         separator: { mx: '-1.5', my: '0.5' },
       },
       md: {
-        content: { p: '1', gap: '0.5', textStyle: 'md' },
-        item: { px: '2', minH: '10', gap: '2', _icon: { boxSize: '4' } },
+        content: { p: '1', gap: '0.5', textStyle: 'body-sm' },
+        item: { px: '2.5', minH: '8', gap: '2', _icon: { boxSize: '4' } },
         itemGroup: { gap: '0.5' },
-        itemGroupLabel: { px: '2', height: '10' },
-        separator: { mx: '-2', my: '0.5' },
+        itemGroupLabel: { px: '2.5', height: '8' },
+        separator: { mx: '-2.5', my: '0.5' },
       },
       lg: {
         content: { p: '1', gap: '0.5', textStyle: 'md' },

@@ -17,21 +17,22 @@ export const fileUpload = defineSlotRecipe({
     },
     dropzone: {
       alignItems: 'center',
-      background: 'gray.surface.bg',
+      background: 'bg.subtle',
       borderRadius: 'l3',
-      borderStyle: 'dashed',
-      borderWidth: '2px',
+      borderStyle: 'solid',
+      borderWidth: '1px',
+      borderColor: 'border.strong',
       display: 'flex',
       flexDirection: 'column',
+      gap: '1.5',
 
       focusVisibleRing: 'outside',
       justifyContent: 'center',
       transition: 'backgrounds',
       width: 'full',
       _dragging: {
-        background: 'gray.surface.bg.hover',
-        borderStyle: 'solid',
-        borderColor: 'colorPalette.solid.bg',
+        background: 'grass.a2',
+        borderColor: 'grass.9',
       },
     },
     item: {
@@ -75,7 +76,7 @@ export const fileUpload = defineSlotRecipe({
     size: {
       md: {
         root: { gap: '4' },
-        dropzone: { px: '6', py: '4', minHeight: 'xs', gap: '0' },
+        dropzone: { px: '6', py: '4', minHeight: { base: '160px', sm: '180px' }, gap: '1.5' },
         item: { p: '4', gap: '3', textStyle: 'sm' },
         itemGroup: { gap: '3' },
         itemDeleteTrigger: { _icon: { boxSize: '4' } },
