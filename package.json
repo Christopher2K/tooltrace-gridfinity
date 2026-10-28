@@ -33,11 +33,6 @@
     "zod": "^4.4.3",
     "zustand": "^5.0.0"
   },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ]
-  },
   "devDependencies": {
     "@pandacss/dev": "^1.0.0",
     "@radix-ui/colors": "^3.0.0",
