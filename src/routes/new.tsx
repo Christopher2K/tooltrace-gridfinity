@@ -5,13 +5,19 @@ import { css, cx } from '~/styled-system/css'
 import { Button, Card, FileUpload, Slider, Spinner, Switch } from '~/components/ui'
 import { downloadPdf, type PaperSize } from '~/lib/pdf'
 import { generateTemplatePdf } from '~/lib/template'
-import { convertIfHeic } from '~/lib/heic'
+import { convertIfHeic, isHeicFile } from '~/lib/heic'
 import { detectInScan, getTemplatePaperSize, prepareScan, setTemplatePaperSize, type PreparedScan, type QuadSource } from '~/lib/vision'
 import { bboxOf } from '~/lib/geometry'
 import type { Point, ToolTrace } from '~/stores/editor'
 import { useEditorStore } from '~/stores/editor'
 
 export const Route = createFileRoute('/new')({
+  head: () => ({
+    meta: [
+      { title: 'New Trace — Gridfinity Tooltrace' },
+      { name: 'robots', content: 'noindex, nofollow' },
+    ],
+  }),
   component: NewTrace,
 })
 
@@ -292,7 +298,9 @@ function NewTrace() {
                     {({ acceptedFiles }) =>
                       acceptedFiles.map((file) => (
                         <FileUpload.Item key={file.name} file={file}>
-                          <FileUpload.ItemPreviewImage />
+                          {/* HEIC files can't be decoded by the browser — show the generic
+                              file icon instead of a broken image preview. */}
+                          {isHeicFile(file) ? <FileUpload.ItemPreview /> : <FileUpload.ItemPreviewImage />}
                           <FileUpload.ItemName />
                           <FileUpload.ItemSizeText />
                           <FileUpload.ItemDeleteTrigger />

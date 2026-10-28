@@ -5,8 +5,11 @@ import { Button, Text } from '~/components/ui'
 import { downloadPdf } from '~/lib/pdf'
 import { generateTemplatePdf } from '~/lib/template'
 import { getTemplatePaperSize } from '~/lib/vision'
+import { socialTags } from '~/lib/seo'
 
 export const Route = createFileRoute('/')({
+  // Canonical only on the indexable landing page (app routes are noindex).
+  head: () => ({ links: [socialTags('/').canonical] }),
   component: Home,
 })
 

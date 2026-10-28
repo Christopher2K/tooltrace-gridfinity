@@ -12,6 +12,8 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as EditRouteImport } from './routes/edit'
 import { Route as NewRouteImport } from './routes/new'
+import { Route as RobotsDottxtRouteImport } from './routes/robots[.]txt'
+import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as ApiConvertHeicRouteImport } from './routes/api/convert-heic'
 
 const IndexRoute = IndexRouteImport.update({
@@ -29,6 +31,16 @@ const NewRoute = NewRouteImport.update({
   path: '/new',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RobotsDottxtRoute = RobotsDottxtRouteImport.update({
+  id: '/robots.txt',
+  path: '/robots.txt',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
+  id: '/sitemap.xml',
+  path: '/sitemap.xml',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiConvertHeicRoute = ApiConvertHeicRouteImport.update({
   id: '/api/convert-heic',
   path: '/api/convert-heic',
@@ -39,12 +51,16 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/edit': typeof EditRoute
   '/new': typeof NewRoute
+  '/robots.txt': typeof RobotsDottxtRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/api/convert-heic': typeof ApiConvertHeicRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/edit': typeof EditRoute
   '/new': typeof NewRoute
+  '/robots.txt': typeof RobotsDottxtRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/api/convert-heic': typeof ApiConvertHeicRoute
 }
 export interface FileRoutesById {
@@ -52,20 +68,43 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/edit': typeof EditRoute
   '/new': typeof NewRoute
+  '/robots.txt': typeof RobotsDottxtRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/api/convert-heic': typeof ApiConvertHeicRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/edit' | '/new' | '/api/convert-heic'
+  fullPaths:
+    | '/'
+    | '/edit'
+    | '/new'
+    | '/robots.txt'
+    | '/sitemap.xml'
+    | '/api/convert-heic'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/edit' | '/new' | '/api/convert-heic'
-  id: '__root__' | '/' | '/edit' | '/new' | '/api/convert-heic'
+  to:
+    | '/'
+    | '/edit'
+    | '/new'
+    | '/robots.txt'
+    | '/sitemap.xml'
+    | '/api/convert-heic'
+  id:
+    | '__root__'
+    | '/'
+    | '/edit'
+    | '/new'
+    | '/robots.txt'
+    | '/sitemap.xml'
+    | '/api/convert-heic'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   EditRoute: typeof EditRoute
   NewRoute: typeof NewRoute
+  RobotsDottxtRoute: typeof RobotsDottxtRoute
+  SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   ApiConvertHeicRoute: typeof ApiConvertHeicRoute
 }
 
@@ -92,6 +131,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof NewRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/robots.txt': {
+      id: '/robots.txt'
+      path: '/robots.txt'
+      fullPath: '/robots.txt'
+      preLoaderRoute: typeof RobotsDottxtRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sitemap.xml': {
+      id: '/sitemap.xml'
+      path: '/sitemap.xml'
+      fullPath: '/sitemap.xml'
+      preLoaderRoute: typeof SitemapDotxmlRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/convert-heic': {
       id: '/api/convert-heic'
       path: '/api/convert-heic'
@@ -106,6 +159,8 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   EditRoute: EditRoute,
   NewRoute: NewRoute,
+  RobotsDottxtRoute: RobotsDottxtRoute,
+  SitemapDotxmlRoute: SitemapDotxmlRoute,
   ApiConvertHeicRoute: ApiConvertHeicRoute,
 }
 export const routeTree = rootRouteImport

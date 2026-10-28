@@ -11,6 +11,7 @@ import { css } from '~/styled-system/css'
 import { DefaultCatchBoundary } from '~/components/DefaultCatchBoundary'
 import { NotFound } from '~/components/NotFound'
 import { IconButton, Menu } from '~/components/ui'
+import { SITE_DESCRIPTION, SITE_TITLE, socialTags } from '~/lib/seo'
 import appCss from '~/styles/app.css?url'
 
 export const Route = createRootRoute({
@@ -18,18 +19,22 @@ export const Route = createRootRoute({
     meta: [
       { charSet: 'utf-8' },
       { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-      {
-        title: 'Gridfinity Tooltrace — Photo to custom tool inserts',
-      },
-      {
-        name: 'description',
-        content:
-          'Snap a photo of your tools and generate custom Gridfinity bin inserts. Export STL and print-test PDFs.',
-      },
+      { title: SITE_TITLE },
+      { name: 'description', content: SITE_DESCRIPTION },
+      // Matches `theme_color` in site.webmanifest (grass.9).
+      { name: 'theme-color', content: '#46A758' },
+      // App routes override this with `noindex` (meta dedupes by name).
+      { name: 'robots', content: 'index, follow, max-image-preview:large' },
+      ...socialTags('/').meta,
     ],
     links: [
       { rel: 'stylesheet', href: appCss },
+      { rel: 'icon', href: '/logo.svg', type: 'image/svg+xml' },
+      { rel: 'icon', href: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
+      { rel: 'icon', href: '/favicon-16x16.png', sizes: '16x16', type: 'image/png' },
       { rel: 'icon', href: '/favicon.ico' },
+      { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
+      { rel: 'manifest', href: '/site.webmanifest' },
     ],
   }),
   errorComponent: DefaultCatchBoundary,

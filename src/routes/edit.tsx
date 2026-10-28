@@ -9,6 +9,12 @@ import { ValidationPanel } from '~/components/editor/validation-panel'
 import { GRID_UNIT_MM, useEditorStore } from '~/stores/editor'
 
 export const Route = createFileRoute('/edit')({
+  head: () => ({
+    meta: [
+      { title: 'Editor — Gridfinity Tooltrace' },
+      { name: 'robots', content: 'noindex, nofollow' },
+    ],
+  }),
   component: Editor,
 })
 
