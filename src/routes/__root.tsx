@@ -11,7 +11,7 @@ import { css } from '~/styled-system/css'
 import { DefaultCatchBoundary } from '~/components/DefaultCatchBoundary'
 import { NotFound } from '~/components/NotFound'
 import { IconButton, Menu } from '~/components/ui'
-import { SITE_DESCRIPTION, SITE_TITLE, socialTags } from '~/lib/seo'
+import { SITE_DESCRIPTION, SITE_TITLE, SITE_URL, socialTags } from '~/lib/seo'
 import appCss from '~/styles/app.css?url'
 
 export const Route = createRootRoute({
@@ -35,6 +35,13 @@ export const Route = createRootRoute({
       { rel: 'icon', href: '/favicon.ico' },
       { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
       { rel: 'manifest', href: '/site.webmanifest' },
+    ],
+    scripts: [
+      {
+        src: 'https://stats.coolsrv.dev/js/script.js',
+        defer: true,
+        'data-domain': new URL(SITE_URL).hostname,
+      },
     ],
   }),
   errorComponent: DefaultCatchBoundary,
